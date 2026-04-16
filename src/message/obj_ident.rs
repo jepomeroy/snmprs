@@ -35,8 +35,28 @@ pub(crate) struct ObjectIdentifier {
 }
 
 impl ObjectIdentifier {
-    pub(crate) fn new(oid: Vec<u32>) -> Self {
-        Self { value: oid }
+    // Validates and creates an ObjectIdentifier.
+    // Per X.660: first arc must be 0, 1, or 2; when first arc is 0 or 1,
+    // second arc must be 0-39.
+    pub(crate) fn new(oid: Vec<u32>) -> Result<Self, ObjectIdentifierError> {
+        if oid.len() < 2 {
+            return Err(ObjectIdentifierError::ParseError(
+                "OID must have at least two components".to_string(),
+            ));
+        }
+        if oid[0] > 2 {
+            return Err(ObjectIdentifierError::ParseError(format!(
+                "first OID arc must be 0, 1, or 2, got {}",
+                oid[0]
+            )));
+        }
+        if oid[0] < 2 && oid[1] > 39 {
+            return Err(ObjectIdentifierError::ParseError(format!(
+                "second OID arc must be 0-39 when first arc is {}, got {}",
+                oid[0], oid[1]
+            )));
+        }
+        Ok(Self { value: oid })
     }
 
     pub(crate) fn get_value(&self) -> Vec<u32> {
@@ -62,7 +82,7 @@ impl FromStr for ObjectIdentifier {
             }
         }
 
-        Ok(ObjectIdentifier::new(oid_vec))
+        ObjectIdentifier::new(oid_vec)
     }
 }
 
@@ -71,7 +91,7 @@ impl TryFrom<&OID> for ObjectIdentifier {
 
     fn try_from(value: &OID) -> Result<Self, Self::Error> {
         match value.as_vec::<u32>() {
-            Ok(oid_vec) => Ok(ObjectIdentifier::new(oid_vec)),
+            Ok(oid_vec) => ObjectIdentifier::new(oid_vec),
             Err(e) => Err(ObjectIdentifierError::DecodeError(e.to_string())),
         }
     }
@@ -92,9 +112,22 @@ mod test {
 
     #[test]
     fn test_create_obj_ident_from_vec() {
-        let oid = ObjectIdentifier::new(vec![1, 3, 4, 105, 99, 0, 1]);
+        let oid = ObjectIdentifier::new(vec![1, 3, 4, 105, 99, 0, 1]).unwrap();
         assert_eq!(oid.get_value(), vec![1, 3, 4, 105, 99, 0, 1]);
         assert_eq!(oid.length(), 7);
+    }
+
+    #[test]
+    fn test_arc_validation() {
+        // invalid first arc
+        assert!(ObjectIdentifier::new(vec![3, 0]).is_err());
+        // second arc > 39 when first arc is 0 or 1
+        assert!(ObjectIdentifier::new(vec![0, 40]).is_err());
+        assert!(ObjectIdentifier::new(vec![1, 40]).is_err());
+        // second arc constraint does not apply when first arc is 2
+        assert!(ObjectIdentifier::new(vec![2, 40]).is_ok());
+        // too few components
+        assert!(ObjectIdentifier::new(vec![1]).is_err());
     }
 
     #[test]

@@ -1,9 +1,7 @@
-use core::marker::PhantomData;
-use simple_asn1::{ASN1Block, ASN1DecodeErr, ASN1EncodeErr, BigInt, FromASN1, ToASN1};
+use std::fmt::Display;
+use simple_asn1::{ASN1Block, ASN1Class, ASN1DecodeErr, ASN1EncodeErr, BigInt, BigUint, FromASN1, ToASN1, to_der};
 
 use crate::message::var_bind::VarBind;
-
-use super::var_bind;
 
 #[derive(Debug)]
 pub(crate) enum SNMPMessageError {
@@ -13,11 +11,18 @@ pub(crate) enum SNMPMessageError {
     TooLong(usize),
 }
 
-// impl Display for SNMPMessageError {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         todo!()
-//     }
-// }
+impl Display for SNMPMessageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SNMPMessageError::DecodeError(e) => write!(f, "Decode error: {}", e),
+            SNMPMessageError::EncodeError(e) => write!(f, "Encode error: {}", e),
+            SNMPMessageError::ParseError(e) => write!(f, "Parse error: {}", e),
+            SNMPMessageError::TooLong(n) => write!(f, "Message too long: {} bytes", n),
+        }
+    }
+}
+
+impl std::error::Error for SNMPMessageError {}
 
 impl From<ASN1DecodeErr> for SNMPMessageError {
     fn from(value: ASN1DecodeErr) -> Self {
@@ -57,23 +62,14 @@ pub(crate) enum PDUError {
     InconsistentName = 18,
 }
 
-impl From<ASN1DecodeErr> for PDUError {
-    fn from(value: ASN1DecodeErr) -> Self {
-        todo!()
-    }
-}
 
-impl From<ASN1EncodeErr> for PDUError {
-    fn from(value: ASN1EncodeErr) -> Self {
-        todo!()
-    }
-}
-
-enum PDUType {
+#[derive(Clone, Copy)]
+pub(crate) enum PDUType {
     GetRequest = 0,
     GetNextRequest = 1,
     Response = 2,
     SetRequest = 3,
+    // 4 is obsolete (SNMPv1 Trap; not used in v2c/v3)
     GetBulkRequest = 5,
     InformRequest = 6,
     Trap = 7,
@@ -81,6 +77,7 @@ enum PDUType {
 }
 
 pub(crate) struct PDU {
+    pdu_type: PDUType,
     request_id: i32,
     error_status: i32,
     error_index: u32,
@@ -88,8 +85,9 @@ pub(crate) struct PDU {
 }
 
 impl PDU {
-    pub(crate) fn new(v: Vec<VarBind>) -> Self {
+    pub(crate) fn new(pdu_type: PDUType, v: Vec<VarBind>) -> Self {
         Self {
+            pdu_type,
             request_id: generate_request_id(),
             error_status: 0,
             error_index: 0,
@@ -98,7 +96,7 @@ impl PDU {
     }
 }
 impl FromASN1 for PDU {
-    type Error = PDUError;
+    type Error = SNMPMessageError;
 
     fn from_asn1(
         v: &[simple_asn1::ASN1Block],
@@ -110,32 +108,42 @@ impl FromASN1 for PDU {
 impl ToASN1 for PDU {
     type Error = SNMPMessageError;
 
-    fn to_asn1_class(&self, c: simple_asn1::ASN1Class) -> Result<Vec<ASN1Block>, Self::Error> {
-        let mut asn_vec = Vec::<ASN1Block>::new();
-
-        let req_id_block = ASN1Block::Integer(0, BigInt::from(self.request_id));
-        let err_status_block = ASN1Block::Integer(0, BigInt::from(self.error_status));
-        let err_index_block = ASN1Block::Integer(0, BigInt::from(self.error_index));
-
-        asn_vec.push(req_id_block);
-        asn_vec.push(err_status_block);
-        asn_vec.push(err_index_block);
-
+    fn to_asn1_class(&self, _c: simple_asn1::ASN1Class) -> Result<Vec<ASN1Block>, Self::Error> {
+        let mut var_bind_list: Vec<ASN1Block> = Vec::new();
         for var_bind in &self.var_bindings {
-            let mut var_bind_block = var_bind.to_asn1()?;
-            asn_vec.append(&mut var_bind_block);
+            var_bind_list.append(&mut var_bind.to_asn1()?);
         }
 
-        let asn_seq = ASN1Block::Sequence(0, asn_vec);
+        let inner_blocks = [
+            ASN1Block::Integer(0, BigInt::from(self.request_id)),
+            ASN1Block::Integer(0, BigInt::from(self.error_status)),
+            ASN1Block::Integer(0, BigInt::from(self.error_index)),
+            ASN1Block::Sequence(0, var_bind_list),
+        ];
 
-        Ok(vec![asn_seq])
+        // RFC 3416: PDU types are implicitly context-tagged (e.g. [0] IMPLICIT PDU).
+        // Encode each inner element to DER and concatenate as the raw content of the
+        // context-specific tag, replacing the outer SEQUENCE tag.
+        let mut content_bytes: Vec<u8> = Vec::new();
+        for block in &inner_blocks {
+            content_bytes.extend(to_der(block)?);
+        }
+
+        let tag = BigUint::from(self.pdu_type as u8);
+        Ok(vec![ASN1Block::Unknown(
+            ASN1Class::ContextSpecific,
+            true, // constructed
+            0,
+            tag,
+            content_bytes,
+        )])
     }
 }
 
 pub(crate) struct BulkPDU {
     request_id: i32,
-    non_repeaters: i32,
-    max_repetions: i32,
+    non_repeaters: u32,
+    max_repetitions: u32,
     var_bindings: Vec<VarBind>,
 }
 
@@ -144,14 +152,14 @@ impl BulkPDU {
         Self {
             request_id: generate_request_id(),
             non_repeaters: 0,
-            max_repetions: 0,
+            max_repetitions: 0,
             var_bindings: v,
         }
     }
 }
 
 impl FromASN1 for BulkPDU {
-    type Error = PDUError;
+    type Error = SNMPMessageError;
 
     fn from_asn1(
         v: &[simple_asn1::ASN1Block],
@@ -161,12 +169,53 @@ impl FromASN1 for BulkPDU {
 }
 
 impl ToASN1 for BulkPDU {
-    type Error = PDUError;
+    type Error = SNMPMessageError;
 
     fn to_asn1_class(
         &self,
-        c: simple_asn1::ASN1Class,
+        _c: simple_asn1::ASN1Class,
     ) -> Result<Vec<simple_asn1::ASN1Block>, Self::Error> {
         todo!()
+    }
+}
+
+// RFC 3412 — SNMPv3 scoped PDU: ties a PDU to a specific SNMP engine and context.
+pub(crate) struct ScopedPDU {
+    context_engine_id: Vec<u8>,
+    context_name: Vec<u8>, // max 32 bytes per RFC 3412
+    data: PDU,
+}
+
+impl ScopedPDU {
+    pub(crate) fn new(context_engine_id: Vec<u8>, context_name: Vec<u8>, data: PDU) -> Self {
+        Self {
+            context_engine_id,
+            context_name,
+            data,
+        }
+    }
+}
+
+impl FromASN1 for ScopedPDU {
+    type Error = SNMPMessageError;
+
+    fn from_asn1(v: &[ASN1Block]) -> Result<(Self, &[ASN1Block]), Self::Error> {
+        todo!()
+    }
+}
+
+impl ToASN1 for ScopedPDU {
+    type Error = SNMPMessageError;
+
+    fn to_asn1_class(&self, _c: ASN1Class) -> Result<Vec<ASN1Block>, Self::Error> {
+        let engine_id =
+            ASN1Block::OctetString(self.context_engine_id.len(), self.context_engine_id.clone());
+        let context_name =
+            ASN1Block::OctetString(self.context_name.len(), self.context_name.clone());
+
+        let mut inner = vec![engine_id, context_name];
+        inner.append(&mut self.data.to_asn1()?);
+
+        Ok(vec![ASN1Block::Sequence(0, inner)])
     }
 }
