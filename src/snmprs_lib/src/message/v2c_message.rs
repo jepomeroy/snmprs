@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 // RFC 1901 — SNMPv2c community-based message wrapper.
 //
 // Message ::= SEQUENCE {
@@ -13,10 +15,19 @@ use crate::message::ber::Tag::{OctetString, Sequence};
 const SNMP_V2C_VERSION: i32 = 1;
 
 /// A community-based SNMPv2c message, ready to encode and send.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct V2cMessage {
     community: Vec<u8>,
     data: PduData,
+}
+
+impl Debug for V2cMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("V2cMessage")
+            .field("community", &"[REDACTED]")
+            .field("data", &self.data)
+            .finish()
+    }
 }
 
 impl V2cMessage {

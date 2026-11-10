@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::str::FromStr;
 
 use crate::errors::SnmpMessageError;
@@ -24,9 +25,16 @@ pub trait SnmpMessageBuilder {
 }
 
 /// Builds SNMPv2c messages that all use one community string.
-#[derive(Debug)]
 pub struct SnmpV2MessageBuilder {
     community: Vec<u8>,
+}
+
+impl Debug for SnmpV2MessageBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SnmpV2MessageBuilder")
+            .field("community", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl SnmpV2MessageBuilder {

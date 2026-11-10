@@ -24,7 +24,7 @@ tests during Phases 1–2 rather than waiting for Phase 5.
   - [x] Support IPv6 and hostnames; `BaseClient` is IPv4 only.
   - [ ] Add a configurable policy for source addresses. The connected socket drops replies that a multihomed agent sends from a different IP.
   - [x] Reuse the receive buffer; each receive allocates 65 KB.
-- [ ] **Protect secrets.** Derived `Debug` on `SnmpV2MessageBuilder` and `V2cMessage` prints the community string. Redact it there and accept communities as bytes.
+- [x] **Protect secrets.** Derived `Debug` on `SnmpV2MessageBuilder` and `V2cMessage` prints the community string. Redact it there and accept communities as bytes.
 - [x] **Rework the error types.** All error types now live in `errors.rs` and use `thiserror`. Variants carry structured fields instead of strings, OS failures keep their `io::Error` as the source, and the enums are `#[non_exhaustive]`. The CLI prints the full chain of causes.
 - [x] **Tighten the public API.** Use one consistent `encode` visibility, and add `#![forbid(unsafe_code)]` and `#![warn(missing_docs)]`. Only whole messages (`V2cMessage`) have a public `encode`; PDUs, varbinds and values use `pub(crate)`, because they can't be sent alone. Every public item is now documented.
 
