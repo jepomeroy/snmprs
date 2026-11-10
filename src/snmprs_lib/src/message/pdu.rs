@@ -9,16 +9,25 @@ fn generate_request_id() -> i32 {
     rand::random::<i32>()
 }
 
+/// The kind of a standard PDU (RFC 3416). GetBulkRequest isn't listed because it
+/// has its own layout: see [`BulkPdu`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PduType {
+    /// Reads the named variables.
     GetRequest = 0,
+    /// Reads the variables that follow the named ones in the MIB.
     GetNextRequest = 1,
+    /// An agent's reply to a request.
     Response = 2,
+    /// Writes the given values.
     SetRequest = 3,
     // 4 is obsolete (SNMPv1 Trap; not used in v2c/v3)
     // 5 is GetBulkRequest, which has its own layout: see BulkPdu
+    /// A notification that the receiver acknowledges.
     InformRequest = 6,
+    /// An unacknowledged notification (SNMPv2-Trap-PDU).
     Trap = 7,
+    /// An internal SNMPv3 report, such as a USM discovery or error reply.
     Report = 8,
 }
 
@@ -58,6 +67,7 @@ fn encode_pdu(
     Ok(ber::write(tag, &content))
 }
 
+/// A standard PDU: every type except GetBulkRequest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pdu {
     pdu_type: PduType,
@@ -68,6 +78,7 @@ pub struct Pdu {
 }
 
 impl Pdu {
+    /// Builds a PDU with a random request ID and no error.
     pub fn new(pdu_type: PduType, v: Vec<VarBind>) -> Self {
         Self {
             pdu_type,
@@ -78,16 +89,18 @@ impl Pdu {
         }
     }
 
+    /// The ID that ties a response to this request.
     pub fn request_id(&self) -> i32 {
         self.request_id
     }
 
+    /// Replaces the random request ID, for example to resend with the same ID.
     pub fn with_request_id(mut self, request_id: i32) -> Self {
         self.request_id = request_id;
         self
     }
 
-    pub(super) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         encode_pdu(
             self.pdu_type.tag(),
             self.request_id,
@@ -98,6 +111,7 @@ impl Pdu {
     }
 }
 
+/// A GetBulkRequest PDU, which replaces the error fields with repetition counts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BulkPdu {
     request_id: i32,
@@ -127,16 +141,18 @@ impl BulkPdu {
         })
     }
 
+    /// The ID that ties a response to this request.
     pub fn request_id(&self) -> i32 {
         self.request_id
     }
 
+    /// Replaces the random request ID, for example to resend with the same ID.
     pub fn with_request_id(mut self, request_id: i32) -> Self {
         self.request_id = request_id;
         self
     }
 
-    pub(super) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         encode_pdu(
             Tag::GetBulkRequest,
             self.request_id,
@@ -150,18 +166,21 @@ impl BulkPdu {
 /// Any PDU that can be carried by a message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PduData {
+    /// Any PDU type except GetBulkRequest.
     Standard(Pdu),
+    /// A GetBulkRequest.
     Bulk(BulkPdu),
 }
 
 impl PduData {
-    pub fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         match self {
             PduData::Standard(pdu) => pdu.encode(),
             PduData::Bulk(pdu) => pdu.encode(),
         }
     }
 
+    /// The request ID of the wrapped PDU.
     pub fn request_id(&self) -> i32 {
         match self {
             PduData::Standard(pdu) => pdu.request_id(),
@@ -182,7 +201,7 @@ impl From<BulkPdu> for PduData {
     }
 }
 
-// RFC 3412 — SNMPv3 scoped PDU: ties a PDU to a specific SNMP engine and context.
+/// An SNMPv3 scoped PDU (RFC 3412): ties a PDU to a specific SNMP engine and context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopedPdu {
     context_engine_id: Vec<u8>,
@@ -191,6 +210,7 @@ pub struct ScopedPdu {
 }
 
 impl ScopedPdu {
+    /// Wraps `data` for the given context engine ID and context name.
     pub fn new(context_engine_id: Vec<u8>, context_name: Vec<u8>, data: PduData) -> Self {
         Self {
             context_engine_id,
@@ -199,7 +219,9 @@ impl ScopedPdu {
         }
     }
 
-    pub fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    // Only the SNMPv3 message wrapper (Phase 3) will call this.
+    #[allow(dead_code)]
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         let mut content = ber::write(OctetString, &self.context_engine_id);
         content.extend(ber::write(OctetString, &self.context_name));
         content.extend(self.data.encode()?);

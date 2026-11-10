@@ -8,17 +8,23 @@ use crate::message::ber::Tag::{
     TimeTicks,
 };
 
+/// The value half of a variable binding (RFC 3416).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindValue {
+    /// No value, as sent in requests that only name variables. Encoded as NULL.
     Unspecified,
+    /// A real value.
     Value(ObjectValue),
+    /// The agent doesn't implement the object type.
     NoSuchObject,
+    /// The object type exists but this instance doesn't.
     NoSuchInstance,
+    /// A GetNext or GetBulk walk reached the end of the agent's MIB view.
     EndOfMibView,
 }
 
 impl BindValue {
-    fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         match self {
             BindValue::Unspecified => ObjectValue::Null.encode(),
             BindValue::Value(value) => value.encode(),
@@ -34,25 +40,37 @@ fn exception(tag: Tag) -> Vec<u8> {
     ber::write(tag, &[])
 }
 
+/// A value of one of the SMIv2 types (RFC 2578).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObjectValue {
-    //Simple syntax
+    // Simple syntax
+    /// A signed 32-bit INTEGER (Integer32).
     Integer(i32),
+    /// An OCTET STRING, which can hold any bytes.
     OctetString(Vec<u8>),
+    /// A NULL value.
     Null,
+    /// An OBJECT IDENTIFIER.
     ObjectIdentifier(ObjectIdentifier),
-    //Application-wide syntax
+    // Application-wide syntax
+    /// An IPv4 address.
     IpAddress(Ipv4Addr),
+    /// A 32-bit counter that wraps to zero.
     Counter32(u32),
+    /// A 32-bit gauge that sticks at its maximum.
     Gauge32(u32),
+    /// Time in hundredths of a second.
     TimeTicks(u32),
+    /// Arbitrary BER-encoded data wrapped as an OCTET STRING.
     Opaque(Vec<u8>),
+    /// A 64-bit counter that wraps to zero.
     Counter64(u64),
+    /// An unsigned 32-bit integer. It shares Gauge32's tag on the wire.
     Unsigned32(u32),
 }
 
 impl ObjectValue {
-    fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         match self {
             ObjectValue::Integer(v) => Ok(ber::integer(*v)),
             ObjectValue::OctetString(v) => Ok(ber::write(OctetString, v)),
@@ -69,7 +87,7 @@ impl ObjectValue {
     }
 }
 
-// RFC 3416
+/// A variable binding (RFC 3416): an OID paired with its value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VarBind {
     name: ObjectIdentifier,
@@ -77,11 +95,12 @@ pub struct VarBind {
 }
 
 impl VarBind {
+    /// Pairs `name` with `value`.
     pub fn new(name: ObjectIdentifier, value: BindValue) -> Self {
         Self { name, value }
     }
 
-    pub(super) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         let mut content = ber::oid(self.name.value());
         content.extend(self.value.encode()?);
         Ok(ber::write(Sequence, &content))

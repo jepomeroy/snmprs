@@ -12,21 +12,21 @@ tests during Phases 1–2 rather than waiting for Phase 5.
 
 - [x] Commit the current work.
 - [x] **Choose the codec.** Chose a small in-house BER codec (`message/ber.rs`) and removed `asn1-rs`. It mishandled OIDs with a second arc of 40 or more (rejecting them on encode and misreading them on decode) and added 16 crates, while SNMP's application types and device-quirk handling needed custom code either way.
-    - [x] Delete the leftovers: the commented-out `asn1-rs` line in `snmprs_lib/Cargo.toml`, and the unused `Class` enum and `Tag::class()`.
+  - [x] Delete the leftovers: the commented-out `asn1-rs` line in `snmprs_lib/Cargo.toml`, and the unused `Class` enum and `Tag::class()`.
 - [x] **Fix `SnmpMessageBuilder`.** It returns only bytes, so the caller never learns the request ID and can't match the reply. Return a typed request and encode it separately.
 - [x] **Fix OID limits.** Valid OIDs like `2.999.1` are rejected.
-    - [x] Encode them: `ber::oid` writes the merged first value in base 128, so `2.999.1` encodes as `06 03 88 37 01`.
-    - [x] Accept them: `ObjectIdentifier::new` still rejects any second arc above 39. Limit the second arc only under first arcs 0 and 1, and update `test_invalid_prefix_values`, which expects `2.40` to fail.
+  - [x] Encode them: `ber::oid` writes the merged first value in base 128, so `2.999.1` encodes as `06 03 88 37 01`.
+  - [x] Accept them: `ObjectIdentifier::new` still rejects any second arc above 39. Limit the second arc only under first arcs 0 and 1, and update `test_invalid_prefix_values`, which expects `2.40` to fail.
 - [x] **Stop hiding bad values.**
-    - [x] `BulkPdu::new` silently clamps its values; use a checked input instead. It now returns `SnmpMessageError::BulkFieldOutOfRange` for values above 2147483647.
-    - [x] `ErrorStatus::from_int` turns unknown codes into `GenErr`; preserve the unknown code. Unknown codes now become `ErrorStatus::Unknown(code)`, and `to_int` returns them unchanged.
+  - [x] `BulkPdu::new` silently clamps its values; use a checked input instead. It now returns `SnmpMessageError::BulkFieldOutOfRange` for values above 2147483647.
+  - [x] `ErrorStatus::from_int` turns unknown codes into `GenErr`; preserve the unknown code. Unknown codes now become `ErrorStatus::Unknown(code)`, and `to_int` returns them unchanged.
 - [ ] **Fix the socket setup.**
-    - [ ] Support IPv6 and hostnames; `BaseClient` is IPv4 only.
-    - [ ] Add a configurable policy for source addresses. The connected socket drops replies that a multihomed agent sends from a different IP.
-    - [ ] Reuse the receive buffer; each receive allocates 65 KB.
+  - [x] Support IPv6 and hostnames; `BaseClient` is IPv4 only.
+  - [ ] Add a configurable policy for source addresses. The connected socket drops replies that a multihomed agent sends from a different IP.
+  - [x] Reuse the receive buffer; each receive allocates 65 KB.
 - [ ] **Protect secrets.** Derived `Debug` on `SnmpV2MessageBuilder` and `V2cMessage` prints the community string. Redact it there and accept communities as bytes.
 - [x] **Rework the error types.** All error types now live in `errors.rs` and use `thiserror`. Variants carry structured fields instead of strings, OS failures keep their `io::Error` as the source, and the enums are `#[non_exhaustive]`. The CLI prints the full chain of causes.
-- [ ] **Tighten the public API.** Use one consistent `encode` visibility, and add `#![forbid(unsafe_code)]` and `#![warn(missing_docs)]`.
+- [x] **Tighten the public API.** Use one consistent `encode` visibility, and add `#![forbid(unsafe_code)]` and `#![warn(missing_docs)]`. Only whole messages (`V2cMessage`) have a public `encode`; PDUs, varbinds and values use `pub(crate)`, because they can't be sent alone. Every public item is now documented.
 
 ## Phase 1: Decoding (RFC 3416, 3417, 2578)
 
@@ -34,11 +34,11 @@ tests during Phases 1–2 rather than waiting for Phase 5.
 - [ ] Decode every type: integers, octet strings, OIDs, all application types, and the exception values.
 - [ ] Decode all PDU types and the v2c message wrapper.
 - [ ] Make hostile input safe: no panics, with limits on depth, lengths, varbind count and integer overflow.
-    - [x] Header level: `read` checks every declared length against the input, limits length fields to 4 bytes, and rejects multi-byte tags.
-    - [ ] Typed decoders: nesting depth, varbind count and integer overflow (`DecodeError::IntegerOverflow` is defined but not used yet).
+  - [x] Header level: `read` checks every declared length against the input, limits length fields to 4 bytes, and rejects multi-byte tags.
+  - [ ] Typed decoders: nesting depth, varbind count and integer overflow (`DecodeError::IntegerOverflow` is defined but not used yet).
 - [ ] Tolerate common device quirks, such as odd integer padding, behind a defined policy.
-    - [x] Non-minimal lengths such as `81 05` are accepted, and the policy is documented on `read_length`.
-    - [ ] Decide the policy for integer padding and other value-level quirks.
+  - [x] Non-minimal lengths such as `81 05` are accepted, and the policy is documented on `read_length`.
+  - [ ] Decide the policy for integer padding and other value-level quirks.
 - [ ] Add round-trip and property tests, plus fuzz targets. Fixed encoding and decoding vectors exist in `ber.rs`; property tests and fuzz targets don't yet.
 
 ## Phase 2: A working v2c client

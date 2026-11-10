@@ -6,6 +6,7 @@ use std::{
 
 pub use crate::errors::ClientError;
 
+/// The UDP port SNMP agents listen on by default.
 pub const DEFAULT_SNMP_PORT: u16 = 161;
 
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(3);
@@ -18,9 +19,12 @@ const MAX_DATAGRAM_SIZE: usize = 65507;
 pub struct BaseClient {
     socket: UdpSocket,
     remote: SocketAddr,
+    buffer: Box<[u8]>,
 }
 
 impl BaseClient {
+    /// Resolves `host` (an IP address or hostname), binds a local socket of the
+    /// matching family, and connects it to the first resolved address on `port`.
     pub fn new(host: &str, port: u16) -> Result<Self, ClientError> {
         let target = (host, port);
 
@@ -52,9 +56,11 @@ impl BaseClient {
         Ok(Self {
             socket: udp,
             remote,
+            buffer: vec![0; MAX_DATAGRAM_SIZE].into_boxed_slice(),
         })
     }
 
+    /// Sends one datagram to the agent.
     pub fn send(&self, snmp_msg: &[u8]) -> Result<(), ClientError> {
         let sent = self
             .socket
@@ -75,12 +81,12 @@ impl BaseClient {
         Ok(())
     }
 
-    pub fn receive(&self) -> Result<Vec<u8>, ClientError> {
-        let mut buffer = vec![0; MAX_DATAGRAM_SIZE];
-
+    /// Waits for one datagram from the agent and returns it. The slice borrows an
+    /// internal buffer that the next call overwrites.
+    pub fn receive(&mut self) -> Result<&[u8], ClientError> {
         let size = self
             .socket
-            .recv(&mut buffer)
+            .recv(&mut self.buffer)
             .map_err(|source| match source.kind() {
                 ErrorKind::WouldBlock | ErrorKind::TimedOut => ClientError::Timeout {
                     remote: self.remote,
@@ -98,8 +104,7 @@ impl BaseClient {
                 },
             })?;
 
-        buffer.truncate(size);
-        Ok(buffer)
+        Ok(&self.buffer[..size])
     }
 }
 
@@ -114,7 +119,7 @@ mod tests {
         // Stays open so the OS can't report the port as unreachable.
         let agent = UdpSocket::bind("127.0.0.1:0").unwrap();
         let port = agent.local_addr().unwrap().port();
-        let client = BaseClient::new("127.0.0.1", port).unwrap();
+        let mut client = BaseClient::new("127.0.0.1", port).unwrap();
         client
             .socket
             .set_read_timeout(Some(Duration::from_millis(50)))
@@ -134,7 +139,7 @@ mod tests {
         // Fail instead of hanging if the client never sends anything.
         agent.set_read_timeout(Some(TEST_TIMEOUT)).unwrap();
         let port = agent.local_addr().unwrap().port();
-        let client = BaseClient::new("127.0.0.1", port).unwrap();
+        let mut client = BaseClient::new("127.0.0.1", port).unwrap();
 
         client.send(&[1, 2, 3]).unwrap();
 
@@ -182,7 +187,7 @@ mod tests {
         };
         agent.set_read_timeout(Some(TEST_TIMEOUT)).unwrap();
         let port = agent.local_addr().unwrap().port();
-        let client = BaseClient::new("::1", port).unwrap();
+        let mut client = BaseClient::new("::1", port).unwrap();
         assert!(client.socket.local_addr().unwrap().is_ipv6());
 
         client.send(&[1, 2, 3]).unwrap();

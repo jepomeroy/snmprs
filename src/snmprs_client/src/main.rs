@@ -79,7 +79,7 @@ fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-fn run_v2(client: &BaseClient, args: &ArgMatches) -> Result<(), Box<dyn Error>> {
+fn run_v2(client: &mut BaseClient, args: &ArgMatches) -> Result<(), Box<dyn Error>> {
     let community = args
         .get_one::<String>("community")
         .cloned()
@@ -100,11 +100,13 @@ fn run_v2(client: &BaseClient, args: &ArgMatches) -> Result<(), Box<dyn Error>> 
 }
 
 fn run(args: &ArgMatches) -> Result<(), Box<dyn Error>> {
-    let ipaddr = args.get_one::<String>("ipaddr").expect("IP is required");
+    let host = args
+        .get_one::<String>("host")
+        .expect("IP or host is required");
     let port = *args.get_one::<u16>("port").expect("port has a default");
 
     if let Some(v2_ver) = args.subcommand_matches("v2") {
-        return run_v2(&BaseClient::new(ipaddr, port)?, v2_ver);
+        return run_v2(&mut BaseClient::new(host, port)?, v2_ver);
     }
 
     Err("SNMPv3 is not implemented yet".into())

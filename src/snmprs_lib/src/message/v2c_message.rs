@@ -12,6 +12,7 @@ use crate::message::ber::Tag::{OctetString, Sequence};
 
 const SNMP_V2C_VERSION: i32 = 1;
 
+/// A community-based SNMPv2c message, ready to encode and send.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V2cMessage {
     community: Vec<u8>,
@@ -19,10 +20,12 @@ pub struct V2cMessage {
 }
 
 impl V2cMessage {
+    /// Wraps `data` with the given community string.
     pub fn new(community: Vec<u8>, data: PduData) -> Self {
         Self { community, data }
     }
 
+    /// Encodes the message as BER bytes for sending on the wire.
     pub fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         let mut content = ber::integer(SNMP_V2C_VERSION);
         content.extend(ber::write(OctetString, &self.community));
@@ -30,6 +33,7 @@ impl V2cMessage {
         Ok(ber::write(Sequence, &content))
     }
 
+    /// The request ID of the wrapped PDU, for matching the reply.
     pub fn request_id(&self) -> i32 {
         self.data.request_id()
     }

@@ -6,24 +6,31 @@ use crate::message::pdu::{BulkPdu, Pdu, PduType};
 use crate::message::v2c_message::V2cMessage;
 use crate::message::var_bind::{BindValue, ObjectValue, VarBind};
 
+/// Builds single-varbind request messages from an OID string.
 pub trait SnmpMessageBuilder {
+    /// Builds a GetRequest for `oid`.
     fn get(&self, oid: &str) -> Result<V2cMessage, SnmpMessageError>;
+    /// Builds a GetNextRequest for `oid`.
     fn get_next(&self, oid: &str) -> Result<V2cMessage, SnmpMessageError>;
+    /// Builds a GetBulkRequest for `oid`. Both counts must be at most 2147483647.
     fn get_bulk(
         &self,
         oid: &str,
         non_repeaters: u32,
         max_repetitions: u32,
     ) -> Result<V2cMessage, SnmpMessageError>;
+    /// Builds a SetRequest that writes `value` to `oid`.
     fn set(&self, oid: &str, value: ObjectValue) -> Result<V2cMessage, SnmpMessageError>;
 }
 
+/// Builds SNMPv2c messages that all use one community string.
 #[derive(Debug)]
 pub struct SnmpV2MessageBuilder {
     community: Vec<u8>,
 }
 
 impl SnmpV2MessageBuilder {
+    /// Creates a builder for `community`.
     pub fn new(community: String) -> Self {
         Self {
             community: community.into_bytes(),

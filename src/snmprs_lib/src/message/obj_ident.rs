@@ -10,12 +10,15 @@ const MAX_OBJECT_IDENTIFIER_LEN: usize = 128;
 const MAX_FIRST_ARC: u32 = 2;
 const MAX_SECOND_ARC: u32 = 39;
 
+/// A validated OBJECT IDENTIFIER with 2 to 128 arcs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectIdentifier {
     value: Vec<u32>,
 }
 
 impl ObjectIdentifier {
+    /// Validates `oid`: it must have 2 to 128 arcs, a first arc of 0 to 2, and a
+    /// second arc of 0 to 39 unless the first arc is 2.
     pub fn new(oid: Vec<u32>) -> Result<Self, ObjectIdentifierError> {
         if oid.len() > MAX_OBJECT_IDENTIFIER_LEN {
             return Err(ObjectIdentifierError::TooLong {
@@ -41,14 +44,17 @@ impl ObjectIdentifier {
         Ok(Self { value: oid })
     }
 
+    /// The arcs, in order.
     pub fn value(&self) -> &[u32] {
         &self.value
     }
 
+    /// The number of arcs.
     pub fn len(&self) -> usize {
         self.value.len()
     }
 
+    /// Always false, because a valid OID has at least two arcs.
     pub fn is_empty(&self) -> bool {
         self.value.is_empty()
     }
