@@ -20,13 +20,15 @@ tests during Phases 1–2 rather than waiting for Phase 5.
 - [x] **Stop hiding bad values.**
   - [x] `BulkPdu::new` silently clamps its values; use a checked input instead. It now returns `SnmpMessageError::BulkFieldOutOfRange` for values above 2147483647.
   - [x] `ErrorStatus::from_int` turns unknown codes into `GenErr`; preserve the unknown code. Unknown codes now become `ErrorStatus::Unknown(code)`, and `to_int` returns them unchanged.
-- [ ] **Fix the socket setup.**
+- [x] **Fix the socket setup.**
   - [x] Support IPv6 and hostnames; `BaseClient` is IPv4 only.
-  - [ ] Add a configurable policy for source addresses. The connected socket drops replies that a multihomed agent sends from a different IP.
   - [x] Reuse the receive buffer; each receive allocates 65 KB.
-- [x] **Protect secrets.** Derived `Debug` on `SnmpV2MessageBuilder` and `V2cMessage` prints the community string. Redact it there and accept communities as bytes.
-- [x] **Rework the error types.** All error types now live in `errors.rs` and use `thiserror`. Variants carry structured fields instead of strings, OS failures keep their `io::Error` as the source, and the enums are `#[non_exhaustive]`. The CLI prints the full chain of causes.
+  - The source-address policy for multihomed agents moved to Phase 6.
+- [x] **Protect secrets.** Derived `Debug` on `SnmpV2MessageBuilder` and `V2cMessage` prints the community string. Redact it there and accept communities as bytes. `SnmpV2MessageBuilder::new` takes any `impl Into<Vec<u8>>`.
+- [x] **Rework the error types.** All error types now live in `errors.rs` and use `thiserror`. Variants carry structured fields instead of strings, OS failures keep their `io::Error` as the source, and the enums are `#[non_exhaustive]`. The CLI prints the full chain of causes. `ErrorStatus` is a PDU field rather than an error, so it lives in `message/pdu.rs`.
 - [x] **Tighten the public API.** Use one consistent `encode` visibility, and add `#![forbid(unsafe_code)]` and `#![warn(missing_docs)]`. Only whole messages (`V2cMessage`) have a public `encode`; PDUs, varbinds and values use `pub(crate)`, because they can't be sent alone. Every public item is now documented.
+  - The internal `encode` functions can't fail, so they return `Vec<u8>`. Only `V2cMessage::encode` returns a `Result`, leaving room for size caps in Phase 2.
+  - Error types are reached only through `errors`, with no re-exports from other modules.
 
 ## Phase 1: Decoding (RFC 3416, 3417, 2578)
 
@@ -136,6 +138,7 @@ tests during Phases 1–2 rather than waiting for Phase 5.
 - [ ] Provide documented config defaults, a builder API and per-request overrides.
 - [ ] Add optional `serde` support for values and OIDs.
 - [ ] Support source address and interface binding.
+- [ ] Add a configurable policy for source addresses. The connected socket drops replies that a multihomed agent sends from a different IP. (Moved from Phase 0.)
 
 ## Phase 7: CLI
 
@@ -143,7 +146,7 @@ tests during Phases 1–2 rather than waiting for Phase 5.
 - [ ] Parse protocols and security levels into enums, and wire up the v3 flags, which are currently ignored.
 - [ ] Accept secrets through an environment variable or prompt, because command-line arguments are visible in process listings.
 - [ ] Print decoded output, with a JSON option, and define exit codes.
-- [ ] Make the argument layout friendlier: `-i` must currently come before the subcommand.
+- [ ] Make the argument layout friendlier: `-a` must currently come before the subcommand.
 
 ## Phase 8: Release
 

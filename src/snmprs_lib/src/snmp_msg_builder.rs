@@ -38,10 +38,11 @@ impl Debug for SnmpV2MessageBuilder {
 }
 
 impl SnmpV2MessageBuilder {
-    /// Creates a builder for `community`.
-    pub fn new(community: String) -> Self {
+    /// Creates a builder for `community`. Communities are raw bytes on the wire, so
+    /// any byte string is accepted, including a `String`, `&[u8]` or `Vec<u8>`.
+    pub fn new(community: impl Into<Vec<u8>>) -> Self {
         Self {
-            community: community.into_bytes(),
+            community: community.into(),
         }
     }
 
@@ -160,6 +161,27 @@ mod tests {
             builder.get_bulk(SYS_DESCR, 0, u32::MAX),
             Err(SnmpMessageError::BulkFieldOutOfRange { .. })
         ));
+    }
+
+    #[test]
+    fn test_community_accepts_non_utf8_bytes() {
+        let builder = SnmpV2MessageBuilder::new(&[0xff, 0x00][..]);
+
+        let msg = builder.get(SYS_DESCR).unwrap().encode().unwrap();
+
+        // SEQUENCE header and version, then the community OCTET STRING.
+        assert_eq!(&msg[5..9], [0x04, 0x02, 0xff, 0x00]);
+    }
+
+    #[test]
+    fn test_debug_redacts_the_community() {
+        let builder = SnmpV2MessageBuilder::new("s3cret");
+        let msg = builder.get(SYS_DESCR).unwrap();
+
+        for debug in [format!("{:?}", builder), format!("{:?}", msg)] {
+            assert!(!debug.contains("s3cret"), "{}", debug);
+            assert!(debug.contains("[REDACTED]"), "{}", debug);
+        }
     }
 
     #[test]

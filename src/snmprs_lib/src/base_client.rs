@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-pub use crate::errors::ClientError;
+use crate::errors::ClientError;
 
 /// The UDP port SNMP agents listen on by default.
 pub const DEFAULT_SNMP_PORT: u16 = 161;

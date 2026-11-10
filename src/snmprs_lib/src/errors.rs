@@ -1,8 +1,4 @@
-use std::{
-    io,
-    net::{AddrParseError, SocketAddr},
-    time::Duration,
-};
+use std::{io, net::SocketAddr, time::Duration};
 
 use thiserror::Error;
 
@@ -132,15 +128,6 @@ pub enum SnmpMessageError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ClientError {
-    /// The agent address couldn't be parsed.
-    #[error("`{input}` is not a valid IP address")]
-    InvalidAddress {
-        /// The text that was given.
-        input: String,
-        /// The parse failure.
-        source: AddrParseError,
-    },
-
     /// The local UDP socket couldn't be bound.
     #[error("failed to bind a UDP socket to {local}")]
     Bind {
@@ -221,157 +208,11 @@ pub enum ClientError {
     },
 }
 
-/// Represents the possible error statuses in an SNMP PDU (RFC 3416).
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum ErrorStatus {
-    /// No error occurred.
-    NoError,
-    /// The response would be too large to fit in a single message.
-    TooBig,
-    /// Proxy compatibility with SNMPv1: the variable does not exist.
-    NoSuchName,
-    /// Proxy compatibility with SNMPv1: the value is not valid for the variable.
-    BadValue,
-    /// Proxy compatibility with SNMPv1: the variable cannot be modified.
-    ReadOnly,
-    /// A general error not covered by any other status.
-    GenErr,
-    /// The variable is not accessible.
-    NoAccess,
-    /// The value has the wrong type for the variable.
-    WrongType,
-    /// The value has the wrong length for the variable.
-    WrongLength,
-    /// The value has the wrong encoding for the variable.
-    WrongEncoding,
-    /// The value is outside the range allowed for the variable.
-    WrongValue,
-    /// The variable does not exist and cannot be created.
-    NoCreation,
-    /// The value is inconsistent with other managed objects.
-    InconsistentValue,
-    /// A resource needed to assign the value is unavailable.
-    ResourceUnavailable,
-    /// The assignment failed and was rolled back.
-    CommitFailed,
-    /// The assignment failed and could not be rolled back.
-    UndoFailed,
-    /// The request was not authorized.
-    AuthorizationError,
-    /// The variable cannot be modified.
-    NotWritable,
-    /// The variable does not exist and its name is inconsistent with creating it.
-    InconsistentName,
-    /// A code that RFC 3416 doesn't define, kept as received.
-    Unknown(i32),
-}
-
-impl ErrorStatus {
-    /// Converts `ErrorStatus` to its integer representation.
-    pub fn to_int(&self) -> i32 {
-        match self {
-            ErrorStatus::NoError => 0,
-            ErrorStatus::TooBig => 1,
-            ErrorStatus::NoSuchName => 2,
-            ErrorStatus::BadValue => 3,
-            ErrorStatus::ReadOnly => 4,
-            ErrorStatus::GenErr => 5,
-            ErrorStatus::NoAccess => 6,
-            ErrorStatus::WrongType => 7,
-            ErrorStatus::WrongLength => 8,
-            ErrorStatus::WrongEncoding => 9,
-            ErrorStatus::WrongValue => 10,
-            ErrorStatus::NoCreation => 11,
-            ErrorStatus::InconsistentValue => 12,
-            ErrorStatus::ResourceUnavailable => 13,
-            ErrorStatus::CommitFailed => 14,
-            ErrorStatus::UndoFailed => 15,
-            ErrorStatus::AuthorizationError => 16,
-            ErrorStatus::NotWritable => 17,
-            ErrorStatus::InconsistentName => 18,
-            ErrorStatus::Unknown(code) => *code,
-        }
-    }
-
-    /// Converts an integer to an `ErrorStatus`. Codes RFC 3416 doesn't define
-    /// become [`ErrorStatus::Unknown`] with the original value.
-    pub fn from_int(value: i32) -> Self {
-        match value {
-            0 => ErrorStatus::NoError,
-            1 => ErrorStatus::TooBig,
-            2 => ErrorStatus::NoSuchName,
-            3 => ErrorStatus::BadValue,
-            4 => ErrorStatus::ReadOnly,
-            5 => ErrorStatus::GenErr,
-            6 => ErrorStatus::NoAccess,
-            7 => ErrorStatus::WrongType,
-            8 => ErrorStatus::WrongLength,
-            9 => ErrorStatus::WrongEncoding,
-            10 => ErrorStatus::WrongValue,
-            11 => ErrorStatus::NoCreation,
-            12 => ErrorStatus::InconsistentValue,
-            13 => ErrorStatus::ResourceUnavailable,
-            14 => ErrorStatus::CommitFailed,
-            15 => ErrorStatus::UndoFailed,
-            16 => ErrorStatus::AuthorizationError,
-            17 => ErrorStatus::NotWritable,
-            18 => ErrorStatus::InconsistentName,
-            other => ErrorStatus::Unknown(other),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
 
     use super::*;
-
-    // RFC 3416 error-status values.
-    const ERROR_STATUS_CODES: [(ErrorStatus, i32); 19] = [
-        (ErrorStatus::NoError, 0),
-        (ErrorStatus::TooBig, 1),
-        (ErrorStatus::NoSuchName, 2),
-        (ErrorStatus::BadValue, 3),
-        (ErrorStatus::ReadOnly, 4),
-        (ErrorStatus::GenErr, 5),
-        (ErrorStatus::NoAccess, 6),
-        (ErrorStatus::WrongType, 7),
-        (ErrorStatus::WrongLength, 8),
-        (ErrorStatus::WrongEncoding, 9),
-        (ErrorStatus::WrongValue, 10),
-        (ErrorStatus::NoCreation, 11),
-        (ErrorStatus::InconsistentValue, 12),
-        (ErrorStatus::ResourceUnavailable, 13),
-        (ErrorStatus::CommitFailed, 14),
-        (ErrorStatus::UndoFailed, 15),
-        (ErrorStatus::AuthorizationError, 16),
-        (ErrorStatus::NotWritable, 17),
-        (ErrorStatus::InconsistentName, 18),
-    ];
-
-    #[test]
-    fn test_error_status_to_int() {
-        for (status, code) in ERROR_STATUS_CODES {
-            assert_eq!(status.to_int(), code, "{:?}", status);
-        }
-    }
-
-    #[test]
-    fn test_error_status_from_int() {
-        for (status, code) in ERROR_STATUS_CODES {
-            assert_eq!(ErrorStatus::from_int(code), status, "code {}", code);
-        }
-    }
-
-    #[test]
-    fn test_error_status_keeps_unknown_codes() {
-        for code in [-1, 19, i32::MAX, i32::MIN] {
-            let status = ErrorStatus::from_int(code);
-            assert_eq!(status, ErrorStatus::Unknown(code));
-            assert_eq!(status.to_int(), code);
-        }
-    }
 
     #[test]
     fn test_bulk_field_error_message() {

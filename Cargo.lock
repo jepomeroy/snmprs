@@ -184,7 +184,7 @@ checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "snmprs_client"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "snmprs_lib",
@@ -192,7 +192,7 @@ dependencies = [
 
 [[package]]
 name = "snmprs_lib"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rand",
  "thiserror",

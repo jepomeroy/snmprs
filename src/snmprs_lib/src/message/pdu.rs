@@ -1,12 +1,112 @@
 use super::ber;
 use super::var_bind::VarBind;
 use crate::{
-    errors::{ErrorStatus, SnmpMessageError},
+    errors::SnmpMessageError,
     message::ber::Tag::{self, OctetString, Sequence},
 };
 
 fn generate_request_id() -> i32 {
     rand::random::<i32>()
+}
+
+/// Represents the possible error statuses in an SNMP PDU (RFC 3416).
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ErrorStatus {
+    /// No error occurred.
+    NoError,
+    /// The response would be too large to fit in a single message.
+    TooBig,
+    /// Proxy compatibility with SNMPv1: the variable does not exist.
+    NoSuchName,
+    /// Proxy compatibility with SNMPv1: the value is not valid for the variable.
+    BadValue,
+    /// Proxy compatibility with SNMPv1: the variable cannot be modified.
+    ReadOnly,
+    /// A general error not covered by any other status.
+    GenErr,
+    /// The variable is not accessible.
+    NoAccess,
+    /// The value has the wrong type for the variable.
+    WrongType,
+    /// The value has the wrong length for the variable.
+    WrongLength,
+    /// The value has the wrong encoding for the variable.
+    WrongEncoding,
+    /// The value is outside the range allowed for the variable.
+    WrongValue,
+    /// The variable does not exist and cannot be created.
+    NoCreation,
+    /// The value is inconsistent with other managed objects.
+    InconsistentValue,
+    /// A resource needed to assign the value is unavailable.
+    ResourceUnavailable,
+    /// The assignment failed and was rolled back.
+    CommitFailed,
+    /// The assignment failed and could not be rolled back.
+    UndoFailed,
+    /// The request was not authorized.
+    AuthorizationError,
+    /// The variable cannot be modified.
+    NotWritable,
+    /// The variable does not exist and its name is inconsistent with creating it.
+    InconsistentName,
+    /// A code that RFC 3416 doesn't define, kept as received.
+    Unknown(i32),
+}
+
+impl ErrorStatus {
+    /// Converts `ErrorStatus` to its integer representation.
+    pub fn to_int(&self) -> i32 {
+        match self {
+            ErrorStatus::NoError => 0,
+            ErrorStatus::TooBig => 1,
+            ErrorStatus::NoSuchName => 2,
+            ErrorStatus::BadValue => 3,
+            ErrorStatus::ReadOnly => 4,
+            ErrorStatus::GenErr => 5,
+            ErrorStatus::NoAccess => 6,
+            ErrorStatus::WrongType => 7,
+            ErrorStatus::WrongLength => 8,
+            ErrorStatus::WrongEncoding => 9,
+            ErrorStatus::WrongValue => 10,
+            ErrorStatus::NoCreation => 11,
+            ErrorStatus::InconsistentValue => 12,
+            ErrorStatus::ResourceUnavailable => 13,
+            ErrorStatus::CommitFailed => 14,
+            ErrorStatus::UndoFailed => 15,
+            ErrorStatus::AuthorizationError => 16,
+            ErrorStatus::NotWritable => 17,
+            ErrorStatus::InconsistentName => 18,
+            ErrorStatus::Unknown(code) => *code,
+        }
+    }
+
+    /// Converts an integer to an `ErrorStatus`. Codes RFC 3416 doesn't define
+    /// become [`ErrorStatus::Unknown`] with the original value.
+    pub fn from_int(value: i32) -> Self {
+        match value {
+            0 => ErrorStatus::NoError,
+            1 => ErrorStatus::TooBig,
+            2 => ErrorStatus::NoSuchName,
+            3 => ErrorStatus::BadValue,
+            4 => ErrorStatus::ReadOnly,
+            5 => ErrorStatus::GenErr,
+            6 => ErrorStatus::NoAccess,
+            7 => ErrorStatus::WrongType,
+            8 => ErrorStatus::WrongLength,
+            9 => ErrorStatus::WrongEncoding,
+            10 => ErrorStatus::WrongValue,
+            11 => ErrorStatus::NoCreation,
+            12 => ErrorStatus::InconsistentValue,
+            13 => ErrorStatus::ResourceUnavailable,
+            14 => ErrorStatus::CommitFailed,
+            15 => ErrorStatus::UndoFailed,
+            16 => ErrorStatus::AuthorizationError,
+            17 => ErrorStatus::NotWritable,
+            18 => ErrorStatus::InconsistentName,
+            other => ErrorStatus::Unknown(other),
+        }
+    }
 }
 
 /// The kind of a standard PDU (RFC 3416). GetBulkRequest isn't listed because it
@@ -53,10 +153,10 @@ fn encode_pdu(
     second_field: i32,
     third_field: i32,
     var_bindings: &[VarBind],
-) -> Result<Vec<u8>, SnmpMessageError> {
+) -> Vec<u8> {
     let mut var_bind_list = Vec::new();
     for var_bind in var_bindings {
-        var_bind_list.extend(var_bind.encode()?);
+        var_bind_list.extend(var_bind.encode());
     }
 
     let mut content = ber::integer(request_id);
@@ -64,7 +164,7 @@ fn encode_pdu(
     content.extend(ber::integer(third_field));
     content.extend(ber::write(Sequence, &var_bind_list));
 
-    Ok(ber::write(tag, &content))
+    ber::write(tag, &content)
 }
 
 /// A standard PDU: every type except GetBulkRequest.
@@ -100,7 +200,7 @@ impl Pdu {
         self
     }
 
-    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         encode_pdu(
             self.pdu_type.tag(),
             self.request_id,
@@ -152,7 +252,7 @@ impl BulkPdu {
         self
     }
 
-    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         encode_pdu(
             Tag::GetBulkRequest,
             self.request_id,
@@ -173,7 +273,7 @@ pub enum PduData {
 }
 
 impl PduData {
-    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         match self {
             PduData::Standard(pdu) => pdu.encode(),
             PduData::Bulk(pdu) => pdu.encode(),
@@ -221,11 +321,11 @@ impl ScopedPdu {
 
     // Only the SNMPv3 message wrapper (Phase 3) will call this.
     #[allow(dead_code)]
-    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         let mut content = ber::write(OctetString, &self.context_engine_id);
         content.extend(ber::write(OctetString, &self.context_name));
-        content.extend(self.data.encode()?);
-        Ok(ber::write(Sequence, &content))
+        content.extend(self.data.encode());
+        ber::write(Sequence, &content)
     }
 }
 
@@ -236,6 +336,52 @@ mod tests {
     use super::*;
     use crate::message::obj_ident::ObjectIdentifier;
     use crate::message::var_bind::BindValue;
+
+    // RFC 3416 error-status values.
+    const ERROR_STATUS_CODES: [(ErrorStatus, i32); 19] = [
+        (ErrorStatus::NoError, 0),
+        (ErrorStatus::TooBig, 1),
+        (ErrorStatus::NoSuchName, 2),
+        (ErrorStatus::BadValue, 3),
+        (ErrorStatus::ReadOnly, 4),
+        (ErrorStatus::GenErr, 5),
+        (ErrorStatus::NoAccess, 6),
+        (ErrorStatus::WrongType, 7),
+        (ErrorStatus::WrongLength, 8),
+        (ErrorStatus::WrongEncoding, 9),
+        (ErrorStatus::WrongValue, 10),
+        (ErrorStatus::NoCreation, 11),
+        (ErrorStatus::InconsistentValue, 12),
+        (ErrorStatus::ResourceUnavailable, 13),
+        (ErrorStatus::CommitFailed, 14),
+        (ErrorStatus::UndoFailed, 15),
+        (ErrorStatus::AuthorizationError, 16),
+        (ErrorStatus::NotWritable, 17),
+        (ErrorStatus::InconsistentName, 18),
+    ];
+
+    #[test]
+    fn test_error_status_to_int() {
+        for (status, code) in ERROR_STATUS_CODES {
+            assert_eq!(status.to_int(), code, "{:?}", status);
+        }
+    }
+
+    #[test]
+    fn test_error_status_from_int() {
+        for (status, code) in ERROR_STATUS_CODES {
+            assert_eq!(ErrorStatus::from_int(code), status, "code {}", code);
+        }
+    }
+
+    #[test]
+    fn test_error_status_keeps_unknown_codes() {
+        for code in [-1, 19, i32::MAX, i32::MIN] {
+            let status = ErrorStatus::from_int(code);
+            assert_eq!(status, ErrorStatus::Unknown(code));
+            assert_eq!(status.to_int(), code);
+        }
+    }
 
     fn var_bind() -> VarBind {
         let name = ObjectIdentifier::from_str("1.3.6").unwrap();
@@ -256,7 +402,7 @@ mod tests {
     #[test]
     fn test_encode_pdu() {
         let pdu = Pdu::new(PduType::GetNextRequest, vec![var_bind()]).with_request_id(7);
-        assert_eq!(pdu.encode().unwrap(), expected(0xa1, [7, 0, 0]));
+        assert_eq!(pdu.encode(), expected(0xa1, [7, 0, 0]));
     }
 
     #[test]
@@ -272,7 +418,7 @@ mod tests {
         ];
         for (pdu_type, tag) in types {
             let pdu = Pdu::new(pdu_type, vec![var_bind()]).with_request_id(7);
-            assert_eq!(pdu.encode().unwrap(), expected(tag, [7, 0, 0]));
+            assert_eq!(pdu.encode(), expected(tag, [7, 0, 0]));
         }
     }
 
@@ -282,7 +428,7 @@ mod tests {
         pdu.error_status = ErrorStatus::NotWritable;
         pdu.error_index = 1;
 
-        assert_eq!(pdu.encode().unwrap(), expected(0xa2, [7, 17, 1]));
+        assert_eq!(pdu.encode(), expected(0xa2, [7, 17, 1]));
     }
 
     #[test]
@@ -296,7 +442,7 @@ mod tests {
         ];
         for (id, id_bytes) in ids {
             let pdu = Pdu::new(PduType::GetRequest, vec![]).with_request_id(id);
-            let encoded = pdu.encode().unwrap();
+            let encoded = pdu.encode();
 
             assert_eq!(pdu.request_id(), id);
             assert_eq!(&encoded[2..2 + id_bytes.len()], id_bytes);
@@ -313,7 +459,7 @@ mod tests {
     fn test_encode_empty_var_bind_list() {
         let pdu = Pdu::new(PduType::GetRequest, vec![]).with_request_id(7);
         assert_eq!(
-            pdu.encode().unwrap(),
+            pdu.encode(),
             [0xa0, 0x0b, 0x02, 0x01, 0x07, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x00]
         );
     }
@@ -331,7 +477,7 @@ mod tests {
         let pdu = Pdu::new(PduType::Response, vec![first, second]).with_request_id(7);
 
         assert_eq!(
-            pdu.encode().unwrap(),
+            pdu.encode(),
             [
                 0xa2, 0x1b, 0x02, 0x01, 0x07, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, // header
                 0x30, 0x10, // VarBindList
@@ -346,7 +492,7 @@ mod tests {
         let pdu = BulkPdu::new(1, 10, vec![var_bind()])
             .unwrap()
             .with_request_id(7);
-        assert_eq!(pdu.encode().unwrap(), expected(0xa5, [7, 1, 10]));
+        assert_eq!(pdu.encode(), expected(0xa5, [7, 1, 10]));
     }
 
     #[test]
@@ -386,6 +532,6 @@ mod tests {
         let mut bytes = vec![0x30, body.len() as u8];
         bytes.extend(body);
 
-        assert_eq!(scoped.encode().unwrap(), bytes);
+        assert_eq!(scoped.encode(), bytes);
     }
 }

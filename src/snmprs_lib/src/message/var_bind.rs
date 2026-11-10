@@ -2,7 +2,6 @@ use std::net::Ipv4Addr;
 
 use super::ber;
 use super::obj_ident::ObjectIdentifier;
-use crate::errors::SnmpMessageError;
 use crate::message::ber::Tag::{
     self, Counter32, Counter64, GaugeOrUnsigned32, IpAddress, Null, OctetString, Opaque, Sequence,
     TimeTicks,
@@ -24,13 +23,13 @@ pub enum BindValue {
 }
 
 impl BindValue {
-    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         match self {
             BindValue::Unspecified => ObjectValue::Null.encode(),
             BindValue::Value(value) => value.encode(),
-            BindValue::NoSuchObject => Ok(exception(Tag::NoSuchObject)),
-            BindValue::NoSuchInstance => Ok(exception(Tag::NoSuchInstance)),
-            BindValue::EndOfMibView => Ok(exception(Tag::EndOfMibView)),
+            BindValue::NoSuchObject => exception(Tag::NoSuchObject),
+            BindValue::NoSuchInstance => exception(Tag::NoSuchInstance),
+            BindValue::EndOfMibView => exception(Tag::EndOfMibView),
         }
     }
 }
@@ -70,19 +69,19 @@ pub enum ObjectValue {
 }
 
 impl ObjectValue {
-    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         match self {
-            ObjectValue::Integer(v) => Ok(ber::integer(*v)),
-            ObjectValue::OctetString(v) => Ok(ber::write(OctetString, v)),
-            ObjectValue::Null => Ok(ber::write(Null, &Vec::new())),
-            ObjectValue::ObjectIdentifier(v) => Ok(ber::oid(v.value())),
-            ObjectValue::IpAddress(v) => Ok(ber::write(IpAddress, &v.octets())),
-            ObjectValue::Counter32(v) => Ok(ber::unsigned(Counter32, u64::from(*v))),
-            ObjectValue::Gauge32(v) => Ok(ber::unsigned(GaugeOrUnsigned32, u64::from(*v))),
-            ObjectValue::TimeTicks(v) => Ok(ber::unsigned(TimeTicks, u64::from(*v))),
-            ObjectValue::Opaque(v) => Ok(ber::write(Opaque, v)),
-            ObjectValue::Counter64(v) => Ok(ber::unsigned(Counter64, *v)),
-            ObjectValue::Unsigned32(v) => Ok(ber::unsigned(GaugeOrUnsigned32, u64::from(*v))),
+            ObjectValue::Integer(v) => ber::integer(*v),
+            ObjectValue::OctetString(v) => ber::write(OctetString, v),
+            ObjectValue::Null => ber::write(Null, &Vec::new()),
+            ObjectValue::ObjectIdentifier(v) => ber::oid(v.value()),
+            ObjectValue::IpAddress(v) => ber::write(IpAddress, &v.octets()),
+            ObjectValue::Counter32(v) => ber::unsigned(Counter32, u64::from(*v)),
+            ObjectValue::Gauge32(v) => ber::unsigned(GaugeOrUnsigned32, u64::from(*v)),
+            ObjectValue::TimeTicks(v) => ber::unsigned(TimeTicks, u64::from(*v)),
+            ObjectValue::Opaque(v) => ber::write(Opaque, v),
+            ObjectValue::Counter64(v) => ber::unsigned(Counter64, *v),
+            ObjectValue::Unsigned32(v) => ber::unsigned(GaugeOrUnsigned32, u64::from(*v)),
         }
     }
 }
@@ -100,10 +99,10 @@ impl VarBind {
         Self { name, value }
     }
 
-    pub(crate) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         let mut content = ber::oid(self.name.value());
-        content.extend(self.value.encode()?);
-        Ok(ber::write(Sequence, &content))
+        content.extend(self.value.encode());
+        ber::write(Sequence, &content)
     }
 }
 
@@ -114,7 +113,7 @@ mod tests {
     use super::*;
 
     fn encode_value(value: ObjectValue) -> Vec<u8> {
-        value.encode().unwrap()
+        value.encode()
     }
 
     #[test]
@@ -123,7 +122,7 @@ mod tests {
         let var_bind = VarBind::new(name, BindValue::Unspecified);
 
         assert_eq!(
-            var_bind.encode().unwrap(),
+            var_bind.encode(),
             [0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x05, 0x00]
         );
     }
@@ -252,15 +251,15 @@ mod tests {
         let var_bind = VarBind::new(name, BindValue::Value(ObjectValue::Gauge32(5)));
 
         assert_eq!(
-            var_bind.encode().unwrap(),
+            var_bind.encode(),
             [0x30, 0x07, 0x06, 0x02, 0x2b, 0x06, 0x42, 0x01, 0x05]
         );
     }
 
     #[test]
     fn test_encode_exceptions() {
-        assert_eq!(BindValue::NoSuchObject.encode().unwrap(), [0x80, 0x00]);
-        assert_eq!(BindValue::NoSuchInstance.encode().unwrap(), [0x81, 0x00]);
-        assert_eq!(BindValue::EndOfMibView.encode().unwrap(), [0x82, 0x00]);
+        assert_eq!(BindValue::NoSuchObject.encode(), [0x80, 0x00]);
+        assert_eq!(BindValue::NoSuchInstance.encode(), [0x81, 0x00]);
+        assert_eq!(BindValue::EndOfMibView.encode(), [0x82, 0x00]);
     }
 }

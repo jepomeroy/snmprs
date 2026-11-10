@@ -37,10 +37,13 @@ impl V2cMessage {
     }
 
     /// Encodes the message as BER bytes for sending on the wire.
+    ///
+    /// No encoding currently fails; the `Result` leaves room for checks such as a
+    /// maximum message size without changing the signature.
     pub fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         let mut content = ber::integer(SNMP_V2C_VERSION);
         content.extend(ber::write(OctetString, &self.community));
-        content.extend(self.data.encode()?);
+        content.extend(self.data.encode());
         Ok(ber::write(Sequence, &content))
     }
 

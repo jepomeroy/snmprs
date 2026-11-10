@@ -19,9 +19,9 @@ fn cli() -> Command {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .arg(
-            Arg::new("ipaddr")
-                .help("IP Address of the SNMP agent")
-                .short('i')
+            Arg::new("host")
+                .help("IP Address or host of the SNMP agent")
+                .short('a')
                 .required(true),
         )
         .arg(
@@ -47,7 +47,7 @@ fn cli() -> Command {
                         .help(
                             "Authentication passphrase protocol (MD5, SHA, SHA-[224|256|384|512])",
                         )
-                        .short('a'),
+                        .short('e'),
                 )
                 .arg(
                     Arg::new("passphrase")
@@ -93,7 +93,7 @@ fn run_v2(client: &mut BaseClient, args: &ArgMatches) -> Result<(), Box<dyn Erro
         client.send(&request.encode()?)?;
 
         // Responses can't be decoded yet, so show the raw message.
-        println!("{}", to_hex(&client.receive()?));
+        println!("{}", to_hex(client.receive()?));
     }
 
     Ok(())
@@ -136,6 +136,30 @@ mod tests {
     #[test]
     fn test_cli_definition() {
         cli().debug_assert();
+    }
+
+    // `debug_assert` only checks the definition, so also read the arguments back the
+    // way `run` does: a mismatched argument id panics here instead of at runtime.
+    #[test]
+    fn test_run_reads_defined_arguments() {
+        let args = cli().get_matches_from([
+            "snmprs",
+            "-a",
+            "localhost",
+            "v2",
+            "-c",
+            "public",
+            "get",
+            "1.3.6",
+        ]);
+
+        assert_eq!(args.get_one::<String>("host").unwrap(), "localhost");
+        assert_eq!(*args.get_one::<u16>("port").unwrap(), 161);
+
+        let v2 = args.subcommand_matches("v2").unwrap();
+        assert_eq!(v2.get_one::<String>("community").unwrap(), "public");
+        let get = v2.subcommand_matches("get").unwrap();
+        assert_eq!(get.get_one::<String>("oid").unwrap(), "1.3.6");
     }
 
     #[test]
