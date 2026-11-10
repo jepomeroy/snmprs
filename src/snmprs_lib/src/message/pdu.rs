@@ -146,10 +146,17 @@ pub enum PduData {
 }
 
 impl PduData {
-    pub(super) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
+    pub fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         match self {
             PduData::Standard(pdu) => pdu.encode(),
             PduData::Bulk(pdu) => pdu.encode(),
+        }
+    }
+
+    pub fn request_id(&self) -> i32 {
+        match self {
+            PduData::Standard(pdu) => pdu.request_id(),
+            PduData::Bulk(pdu) => pdu.request_id(),
         }
     }
 }

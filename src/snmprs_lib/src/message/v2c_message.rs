@@ -29,6 +29,10 @@ impl V2cMessage {
         content.extend(self.data.encode()?);
         Ok(ber::write(Sequence, &content))
     }
+
+    pub fn request_id(&self) -> i32 {
+        self.data.request_id()
+    }
 }
 
 #[cfg(test)]

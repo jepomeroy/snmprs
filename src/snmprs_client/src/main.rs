@@ -89,7 +89,8 @@ fn run_v2(client: &BaseClient, args: &ArgMatches) -> Result<(), Box<dyn Error>> 
     if let Some(get_cmd) = args.subcommand_matches("get") {
         let oid = get_cmd.get_one::<String>("oid").expect("OID is required");
 
-        client.send(&msg_builder.get(oid)?)?;
+        let request = msg_builder.get(oid)?;
+        client.send(&request.encode()?)?;
 
         // Responses can't be decoded yet, so show the raw message.
         println!("{}", to_hex(&client.receive()?));
