@@ -8,13 +8,6 @@ use crate::errors::DecodeError;
 // Types
 // ---------------------------------------------------------------------------
 
-pub(super) enum Class {
-    Universal = 0b00,
-    Application = 0b01,
-    ContextSpecific = 0b10,
-    Private = 0b11,
-}
-
 /// Every tag SNMP v2c and v3 use. Each value is the full tag byte as it appears on
 /// the wire: class in bits 8–7, the constructed flag in bit 6, and the tag number
 /// in bits 5–1.
@@ -46,21 +39,6 @@ pub(super) enum Tag {
     InformRequest = 0xA6,
     SnmpV2Trap = 0xA7,
     Report = 0xA8,
-}
-
-impl Tag {
-    fn class(&self) -> Class {
-        match *self as u8 >> 6 {
-            0 => Class::Universal,
-            1 => Class::Application,
-            2 => Class::ContextSpecific,
-            _ => Class::Universal,
-        }
-    }
-
-    fn is_constructed(&self) -> bool {
-        *self as u8 & 0x20 != 0
-    }
 }
 
 impl From<Tag> for u8 {
