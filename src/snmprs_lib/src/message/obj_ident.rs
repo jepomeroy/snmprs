@@ -1,7 +1,5 @@
 use std::str::FromStr;
 
-use asn1_rs::Oid;
-
 use crate::errors::ObjectIdentifierError;
 
 const MIN_OBJECT_IDENTIFIER_LEN: usize = 2;
@@ -19,21 +17,24 @@ pub struct ObjectIdentifier {
 impl ObjectIdentifier {
     pub fn new(oid: Vec<u32>) -> Result<Self, ObjectIdentifierError> {
         if oid.len() > MAX_OBJECT_IDENTIFIER_LEN {
-            return Err(ObjectIdentifierError::TooLong(
-                oid.len(),
-                MAX_OBJECT_IDENTIFIER_LEN,
-            ));
+            return Err(ObjectIdentifierError::TooLong {
+                len: oid.len(),
+                max: MAX_OBJECT_IDENTIFIER_LEN,
+            });
         };
 
         if oid.len() < MIN_OBJECT_IDENTIFIER_LEN {
-            return Err(ObjectIdentifierError::TooShort(
-                oid.len(),
-                MIN_OBJECT_IDENTIFIER_LEN,
-            ));
+            return Err(ObjectIdentifierError::TooShort {
+                len: oid.len(),
+                min: MIN_OBJECT_IDENTIFIER_LEN,
+            });
         };
 
         if oid[0] > MAX_FIRST_ARC || oid[1] > MAX_SECOND_ARC {
-            return Err(ObjectIdentifierError::InvalidPrefix(oid[0], oid[1]));
+            return Err(ObjectIdentifierError::InvalidPrefix {
+                first: oid[0],
+                second: oid[1],
+            });
         }
 
         Ok(Self { value: oid })
@@ -50,12 +51,6 @@ impl ObjectIdentifier {
     pub fn is_empty(&self) -> bool {
         self.value.is_empty()
     }
-
-    pub(super) fn to_oid(&self) -> Result<Oid<'static>, ObjectIdentifierError> {
-        let arcs: Vec<u64> = self.value.iter().map(|&arc| u64::from(arc)).collect();
-        Oid::from(&arcs)
-            .map_err(|_| ObjectIdentifierError::InvalidPrefix(self.value[0], self.value[1]))
-    }
 }
 
 impl FromStr for ObjectIdentifier {
@@ -66,7 +61,9 @@ impl FromStr for ObjectIdentifier {
             .split('.')
             .map(str::parse::<u32>)
             .collect::<Result<Vec<u32>, _>>()
-            .map_err(|_| ObjectIdentifierError::ParseError(s.to_string()))?;
+            .map_err(|_| ObjectIdentifierError::Parse {
+                input: s.to_string(),
+            })?;
 
         ObjectIdentifier::new(oid_vec)
     }
@@ -74,6 +71,8 @@ impl FromStr for ObjectIdentifier {
 
 #[cfg(test)]
 mod test {
+    use std::vec;
+
     use super::*;
 
     #[test]
@@ -97,13 +96,16 @@ mod test {
         let oid_str_arr = vec![
             (
                 "1.2.3.4.5.a.6",
-                "Parse error: 1.2.3.4.5.a.6 is not the right format",
+                "`1.2.3.4.5.a.6` is not a valid OID: expected numbers from 0 to 4294967295 separated by dots",
             ),
             (
                 "1,2,3,4,5",
-                "Parse error: 1,2,3,4,5 is not the right format",
+                "`1,2,3,4,5` is not a valid OID: expected numbers from 0 to 4294967295 separated by dots",
             ),
-            ("1.3.", "Parse error: 1.3. is not the right format"),
+            (
+                "1.3.",
+                "`1.3.` is not a valid OID: expected numbers from 0 to 4294967295 separated by dots",
+            ),
         ];
         for (oid, expected) in oid_str_arr {
             let oid = ObjectIdentifier::from_str(oid);
@@ -116,12 +118,6 @@ mod test {
     fn test_create_obj_really_bad_str() {
         let oid = ObjectIdentifier::from_str("1.3.4.105084028402984092840239840.99.0.1");
         assert!(oid.is_err());
-    }
-
-    #[test]
-    fn test_asn1_encoding() {
-        let oid = ObjectIdentifier::from_str("1.3.5.7.11.13.17").unwrap();
-        assert_eq!(oid.to_oid().unwrap().to_id_string(), "1.3.5.7.11.13.17");
     }
 
     #[test]
@@ -138,15 +134,19 @@ mod test {
     fn test_empty_vec_is_too_short() {
         assert_eq!(
             ObjectIdentifier::new(vec![]),
-            Err(ObjectIdentifierError::TooShort(0, 2))
+            Err(ObjectIdentifierError::TooShort { len: 0, min: 2 })
         );
     }
 
     #[test]
     fn test_prefix_boundaries_are_accepted() {
-        for (oid, encoded_prefix) in [("0.0.1", 0x00), ("1.39.1", 0x4f), ("2.39.1", 0x77)] {
+        for (oid, oid_vec) in [
+            ("0.0.1", vec![0, 0, 1]),
+            ("1.39.1", vec![1, 39, 1]),
+            ("2.39.1", vec![2, 39, 1]),
+        ] {
             let oid = ObjectIdentifier::from_str(oid).unwrap();
-            assert_eq!(oid.to_oid().unwrap().as_bytes(), [encoded_prefix, 0x01]);
+            assert_eq!(oid.value, oid_vec)
         }
     }
 
@@ -154,10 +154,6 @@ mod test {
     fn test_max_arc_value() {
         let oid = ObjectIdentifier::from_str("1.3.4294967295").unwrap();
         assert_eq!(oid.value(), [1, 3, u32::MAX]);
-        assert_eq!(
-            oid.to_oid().unwrap().as_bytes(),
-            [0x2b, 0x8f, 0xff, 0xff, 0xff, 0x7f]
-        );
     }
 
     #[test]
@@ -175,7 +171,9 @@ mod test {
         for oid in malformed {
             assert_eq!(
                 ObjectIdentifier::from_str(oid),
-                Err(ObjectIdentifierError::ParseError(oid.to_string())),
+                Err(ObjectIdentifierError::Parse {
+                    input: oid.to_string()
+                }),
                 "{:?}",
                 oid
             );
@@ -188,7 +186,9 @@ mod test {
     fn test_leading_dot_is_rejected() {
         assert_eq!(
             ObjectIdentifier::from_str(".1.3.6"),
-            Err(ObjectIdentifierError::ParseError(".1.3.6".to_string()))
+            Err(ObjectIdentifierError::Parse {
+                input: ".1.3.6".to_string()
+            })
         );
     }
 
@@ -197,7 +197,7 @@ mod test {
         for (oid, first, second) in [("3.0", 3, 0), ("2.40", 2, 40), ("0.40.1", 0, 40)] {
             assert_eq!(
                 ObjectIdentifier::from_str(oid),
-                Err(ObjectIdentifierError::InvalidPrefix(first, second))
+                Err(ObjectIdentifierError::InvalidPrefix { first, second })
             );
         }
     }
@@ -207,7 +207,7 @@ mod test {
         for oid in ["3.1.1", "1.40.1"] {
             assert!(matches!(
                 ObjectIdentifier::from_str(oid),
-                Err(ObjectIdentifierError::InvalidPrefix(_, _))
+                Err(ObjectIdentifierError::InvalidPrefix { .. })
             ));
         }
     }
@@ -218,7 +218,7 @@ mod test {
         assert!(oid.is_err());
         assert_eq!(
             oid.unwrap_err().to_string(),
-            "OID of length 129 exceeds the maximum: 128"
+            "OID length 129 is above the maximum of 128 arcs"
         );
     }
 
@@ -229,7 +229,7 @@ mod test {
         assert!(oid.is_err());
         assert_eq!(
             oid.unwrap_err().to_string(),
-            "OID of length 129 exceeds the maximum: 128"
+            "OID length 129 is above the maximum of 128 arcs"
         );
     }
 
@@ -240,7 +240,7 @@ mod test {
         assert!(oid.is_err());
         assert_eq!(
             oid.unwrap_err().to_string(),
-            "OID of length 1 is too short: minimum is 2"
+            "OID length 1 is below the minimum of 2 arcs"
         );
     }
 
@@ -250,7 +250,7 @@ mod test {
         assert!(oid.is_err());
         assert_eq!(
             oid.unwrap_err().to_string(),
-            "OID of length 1 is too short: minimum is 2"
+            "OID length 1 is below the minimum of 2 arcs"
         );
     }
 }

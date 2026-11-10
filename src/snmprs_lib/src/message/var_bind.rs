@@ -1,23 +1,12 @@
-use asn1_rs::{Class, ToDer};
-
 use std::net::Ipv4Addr;
 
-use super::der;
+use super::ber;
 use super::obj_ident::ObjectIdentifier;
 use crate::errors::SnmpMessageError;
-
-// RFC 2578 application-wide tags. Unsigned32 and Gauge32 share a tag on the wire.
-const TAG_IP_ADDRESS: u32 = 0;
-const TAG_COUNTER32: u32 = 1;
-const TAG_GAUGE32: u32 = 2;
-const TAG_TIME_TICKS: u32 = 3;
-const TAG_OPAQUE: u32 = 4;
-const TAG_COUNTER64: u32 = 6;
-
-// RFC 3416 exception tags, used in place of a value in a response.
-const TAG_NO_SUCH_OBJECT: u32 = 0;
-const TAG_NO_SUCH_INSTANCE: u32 = 1;
-const TAG_END_OF_MIB_VIEW: u32 = 2;
+use crate::message::ber::Tag::{
+    self, Counter32, Counter64, GaugeOrUnsigned32, IpAddress, Null, OctetString, Opaque, Sequence,
+    TimeTicks,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindValue {
@@ -33,15 +22,16 @@ impl BindValue {
         match self {
             BindValue::Unspecified => ObjectValue::Null.encode(),
             BindValue::Value(value) => value.encode(),
-            BindValue::NoSuchObject => exception(TAG_NO_SUCH_OBJECT),
-            BindValue::NoSuchInstance => exception(TAG_NO_SUCH_INSTANCE),
-            BindValue::EndOfMibView => exception(TAG_END_OF_MIB_VIEW),
+            BindValue::NoSuchObject => Ok(exception(Tag::NoSuchObject)),
+            BindValue::NoSuchInstance => Ok(exception(Tag::NoSuchInstance)),
+            BindValue::EndOfMibView => Ok(exception(Tag::EndOfMibView)),
         }
     }
 }
 
-fn exception(tag: u32) -> Result<Vec<u8>, SnmpMessageError> {
-    der::tlv(Class::ContextSpecific, false, tag, &[])
+// RFC 3416 exceptions replace the value in a response and have no content.
+fn exception(tag: Tag) -> Vec<u8> {
+    ber::write(tag, &[])
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,41 +54,19 @@ pub enum ObjectValue {
 impl ObjectValue {
     fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         match self {
-            ObjectValue::Integer(v) => der::integer(*v),
-            ObjectValue::OctetString(v) => der::octet_string(v),
-            ObjectValue::Null => Ok(asn1_rs::Null::new().to_der_vec()?),
-            ObjectValue::ObjectIdentifier(v) => Ok(v.to_oid()?.to_der_vec()?),
-            ObjectValue::IpAddress(v) => application(TAG_IP_ADDRESS, &v.octets()),
-            ObjectValue::Counter32(v) => application_uint(TAG_COUNTER32, u64::from(*v)),
-            ObjectValue::Gauge32(v) => application_uint(TAG_GAUGE32, u64::from(*v)),
-            ObjectValue::TimeTicks(v) => application_uint(TAG_TIME_TICKS, u64::from(*v)),
-            ObjectValue::Opaque(v) => application(TAG_OPAQUE, v),
-            ObjectValue::Counter64(v) => application_uint(TAG_COUNTER64, *v),
-            ObjectValue::Unsigned32(v) => application_uint(TAG_GAUGE32, u64::from(*v)),
+            ObjectValue::Integer(v) => Ok(ber::integer(*v)),
+            ObjectValue::OctetString(v) => Ok(ber::write(OctetString, v)),
+            ObjectValue::Null => Ok(ber::write(Null, &Vec::new())),
+            ObjectValue::ObjectIdentifier(v) => Ok(ber::oid(v.value())),
+            ObjectValue::IpAddress(v) => Ok(ber::write(IpAddress, &v.octets())),
+            ObjectValue::Counter32(v) => Ok(ber::unsigned(Counter32, u64::from(*v))),
+            ObjectValue::Gauge32(v) => Ok(ber::unsigned(GaugeOrUnsigned32, u64::from(*v))),
+            ObjectValue::TimeTicks(v) => Ok(ber::unsigned(TimeTicks, u64::from(*v))),
+            ObjectValue::Opaque(v) => Ok(ber::write(Opaque, v)),
+            ObjectValue::Counter64(v) => Ok(ber::unsigned(Counter64, *v)),
+            ObjectValue::Unsigned32(v) => Ok(ber::unsigned(GaugeOrUnsigned32, u64::from(*v))),
         }
     }
-}
-
-fn application(tag: u32, content: &[u8]) -> Result<Vec<u8>, SnmpMessageError> {
-    der::tlv(Class::Application, false, tag, content)
-}
-
-// Implicitly tagged unsigned INTEGER: minimal big-endian bytes, with a leading zero
-// when the top bit is set so the value isn't read as negative.
-fn application_uint(tag: u32, value: u64) -> Result<Vec<u8>, SnmpMessageError> {
-    let bytes = value.to_be_bytes();
-    let first = bytes
-        .iter()
-        .position(|&b| b != 0)
-        .unwrap_or(bytes.len() - 1);
-
-    let mut content = Vec::with_capacity(bytes.len() - first + 1);
-    if bytes[first] & 0x80 != 0 {
-        content.push(0);
-    }
-    content.extend_from_slice(&bytes[first..]);
-
-    application(tag, &content)
 }
 
 // RFC 3416
@@ -114,9 +82,9 @@ impl VarBind {
     }
 
     pub(super) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
-        let mut content = self.name.to_oid()?.to_der_vec()?;
+        let mut content = ber::oid(self.name.value());
         content.extend(self.value.encode()?);
-        der::sequence(&content)
+        Ok(ber::write(Sequence, &content))
     }
 }
 

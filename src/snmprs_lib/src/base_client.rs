@@ -1,10 +1,10 @@
 use std::{
-    error::Error,
-    fmt::Display,
     io::ErrorKind,
-    net::{Ipv4Addr, SocketAddrV4, UdpSocket},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
     time::Duration,
 };
+
+pub use crate::errors::ClientError;
 
 pub const DEFAULT_SNMP_PORT: u16 = 161;
 
@@ -12,79 +12,55 @@ const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(3);
 const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_DATAGRAM_SIZE: usize = 65507;
 
-#[derive(Debug)]
-pub enum ClientError {
-    BadIpAddr(String),
-    BindError(String),
-    ConnectionError(String),
-    SendErr(String),
-    RecvErr(String),
-    Timeout(String),
-}
-
-impl Display for ClientError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ClientError::BadIpAddr(msg) => write!(f, "{}", msg),
-            ClientError::BindError(msg) => write!(f, "{}", msg),
-            ClientError::ConnectionError(msg) => write!(f, "{}", msg),
-            ClientError::SendErr(msg) => write!(f, "{}", msg),
-            ClientError::RecvErr(msg) => write!(f, "{}", msg),
-            ClientError::Timeout(msg) => write!(f, "{}", msg),
-        }
-    }
-}
-
-impl Error for ClientError {}
-
 /// A UDP client connected to a single SNMP agent. Connecting means the OS
 /// drops datagrams that arrive from any other address.
 #[derive(Debug)]
 pub struct BaseClient {
     socket: UdpSocket,
+    remote: SocketAddr,
 }
 
 impl BaseClient {
     pub fn new(ipaddr: &str, port: u16) -> Result<Self, ClientError> {
-        let remote_ip: Ipv4Addr = ipaddr.parse().map_err(|_| {
-            ClientError::BadIpAddr(format!("Unable to parse network address {}", ipaddr))
-        })?;
-        let remote_addr = SocketAddrV4::new(remote_ip, port);
+        let remote_ip: Ipv4Addr = ipaddr
+            .parse()
+            .map_err(|source| ClientError::InvalidAddress {
+                input: ipaddr.to_string(),
+                source,
+            })?;
+        let remote = SocketAddr::V4(SocketAddrV4::new(remote_ip, port));
 
-        let local_addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-        let udp = UdpSocket::bind(local_addr).map_err(|e| {
-            ClientError::BindError(format!(
-                "Unable to bind to network address {}: {}",
-                local_addr, e
-            ))
-        })?;
+        let local = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+        let udp = UdpSocket::bind(local).map_err(|source| ClientError::Bind { local, source })?;
 
         udp.set_read_timeout(Some(DEFAULT_READ_TIMEOUT))
-            .map_err(|_| ClientError::Timeout("Unable to set read timeout on socket".to_owned()))?;
-        udp.set_write_timeout(Some(DEFAULT_WRITE_TIMEOUT))
-            .map_err(|_| {
-                ClientError::Timeout("Unable to set write timeout on socket".to_owned())
-            })?;
+            .and_then(|()| udp.set_write_timeout(Some(DEFAULT_WRITE_TIMEOUT)))
+            .map_err(|source| ClientError::Configure { source })?;
 
-        udp.connect(remote_addr).map_err(|e| {
-            ClientError::ConnectionError(format!("Unable to connect to {}: {}", remote_addr, e))
-        })?;
+        udp.connect(remote)
+            .map_err(|source| ClientError::Connect { remote, source })?;
 
-        Ok(Self { socket: udp })
+        Ok(Self {
+            socket: udp,
+            remote,
+        })
     }
 
     pub fn send(&self, snmp_msg: &[u8]) -> Result<(), ClientError> {
-        let size = self
+        let sent = self
             .socket
             .send(snmp_msg)
-            .map_err(|e| ClientError::SendErr(e.to_string()))?;
+            .map_err(|source| ClientError::Send {
+                remote: self.remote,
+                source,
+            })?;
 
-        if snmp_msg.len() != size {
-            return Err(ClientError::SendErr(format!(
-                "Mismatch between bytes sent {} and bytes in message {}",
-                size,
-                snmp_msg.len()
-            )));
+        if sent != snmp_msg.len() {
+            return Err(ClientError::PartialSend {
+                remote: self.remote,
+                sent,
+                len: snmp_msg.len(),
+            });
         }
 
         Ok(())
@@ -93,12 +69,25 @@ impl BaseClient {
     pub fn receive(&self) -> Result<Vec<u8>, ClientError> {
         let mut buffer = vec![0; MAX_DATAGRAM_SIZE];
 
-        let size = self.socket.recv(&mut buffer).map_err(|e| match e.kind() {
-            ErrorKind::WouldBlock | ErrorKind::TimedOut => {
-                ClientError::Timeout("Timed out waiting for a response".to_owned())
-            }
-            _ => ClientError::RecvErr(e.to_string()),
-        })?;
+        let size = self
+            .socket
+            .recv(&mut buffer)
+            .map_err(|source| match source.kind() {
+                ErrorKind::WouldBlock | ErrorKind::TimedOut => ClientError::Timeout {
+                    remote: self.remote,
+                    // Read back from the socket so the error reports the timeout in effect.
+                    timeout: self
+                        .socket
+                        .read_timeout()
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default(),
+                },
+                _ => ClientError::Receive {
+                    remote: self.remote,
+                    source,
+                },
+            })?;
 
         buffer.truncate(size);
         Ok(buffer)
@@ -123,7 +112,11 @@ mod tests {
             .unwrap();
 
         let err = client.receive().unwrap_err();
-        assert!(matches!(err, ClientError::Timeout(_)), "got {:?}", err);
+        assert!(
+            matches!(err, ClientError::Timeout { timeout, .. } if timeout == Duration::from_millis(50)),
+            "got {:?}",
+            err
+        );
     }
 
     #[test]
@@ -147,6 +140,10 @@ mod tests {
     #[test]
     fn test_bad_ip_addr() {
         let err = BaseClient::new("not-an-ip", DEFAULT_SNMP_PORT).unwrap_err();
-        assert!(matches!(err, ClientError::BadIpAddr(_)));
+        assert!(
+            matches!(&err, ClientError::InvalidAddress { input, .. } if input == "not-an-ip"),
+            "got {:?}",
+            err
+        );
     }
 }

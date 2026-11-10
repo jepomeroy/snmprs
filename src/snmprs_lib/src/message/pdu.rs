@@ -1,10 +1,9 @@
-use asn1_rs::Class;
-
-use super::der;
+use super::ber;
 use super::var_bind::VarBind;
-use crate::errors::{ErrorStatus, SnmpMessageError};
-
-const TAG_GET_BULK_REQUEST: u32 = 5;
+use crate::{
+    errors::{ErrorStatus, SnmpMessageError},
+    message::ber::Tag::{self, OctetString, Sequence},
+};
 
 fn generate_request_id() -> i32 {
     rand::random::<i32>()
@@ -23,10 +22,24 @@ pub enum PduType {
     Report = 8,
 }
 
+impl PduType {
+    fn tag(self) -> Tag {
+        match self {
+            PduType::GetRequest => Tag::GetRequest,
+            PduType::GetNextRequest => Tag::GetNextRequest,
+            PduType::Response => Tag::Response,
+            PduType::SetRequest => Tag::SetRequest,
+            PduType::InformRequest => Tag::InformRequest,
+            PduType::Trap => Tag::SnmpV2Trap,
+            PduType::Report => Tag::Report,
+        }
+    }
+}
+
 // RFC 3416: PDU types are implicitly context-tagged (e.g. [0] IMPLICIT PDU), so the
 // context-specific tag replaces the SEQUENCE tag around the four fields.
 fn encode_pdu(
-    tag: u32,
+    tag: Tag,
     request_id: i32,
     second_field: i32,
     third_field: i32,
@@ -37,12 +50,12 @@ fn encode_pdu(
         var_bind_list.extend(var_bind.encode()?);
     }
 
-    let mut content = der::integer(request_id)?;
-    content.extend(der::integer(second_field)?);
-    content.extend(der::integer(third_field)?);
-    content.extend(der::sequence(&var_bind_list)?);
+    let mut content = ber::integer(request_id);
+    content.extend(ber::integer(second_field));
+    content.extend(ber::integer(third_field));
+    content.extend(ber::write(Sequence, &var_bind_list));
 
-    der::tlv(Class::ContextSpecific, true, tag, &content)
+    Ok(ber::write(tag, &content))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +89,7 @@ impl Pdu {
 
     pub(super) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         encode_pdu(
-            self.pdu_type as u32,
+            self.pdu_type.tag(),
             self.request_id,
             self.error_status.to_int(),
             self.error_index,
@@ -116,7 +129,7 @@ impl BulkPdu {
 
     pub(super) fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
         encode_pdu(
-            TAG_GET_BULK_REQUEST,
+            Tag::GetBulkRequest,
             self.request_id,
             self.non_repeaters,
             self.max_repetitions,
@@ -171,10 +184,10 @@ impl ScopedPdu {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
-        let mut content = der::octet_string(&self.context_engine_id)?;
-        content.extend(der::octet_string(&self.context_name)?);
+        let mut content = ber::write(OctetString, &self.context_engine_id);
+        content.extend(ber::write(OctetString, &self.context_name));
         content.extend(self.data.encode()?);
-        der::sequence(&content)
+        Ok(ber::write(Sequence, &content))
     }
 }
 

@@ -6,5 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-asn1-rs = "0.7.2"
+# asn1-rs = "0.7.2"
 rand = "0.10.3"
+thiserror = "2.0.21"

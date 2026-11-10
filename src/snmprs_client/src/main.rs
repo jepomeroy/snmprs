@@ -113,7 +113,14 @@ fn main() -> ExitCode {
     match run(&cli().get_matches()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("error: {}", e);
+            // Print the whole chain so the underlying cause (such as the OS error) is shown.
+            eprint!("error: {}", e);
+            let mut source = e.source();
+            while let Some(cause) = source {
+                eprint!(": {}", cause);
+                source = cause.source();
+            }
+            eprintln!();
             ExitCode::FAILURE
         }
     }

@@ -10,12 +10,13 @@ tests during Phases 1–2 rather than waiting for Phase 5.
 
 ## Phase 0: Foundations and existing problems
 
-- [ ] Commit the current work.
-- [ ] **Choose the codec.** `der.rs` already builds its own tags, and `asn1-rs` adds little beyond that. Recommended: a small in-house BER codec, because:
-  - Real devices send valid BER that strict DER rejects, such as non-minimal lengths.
-  - v3 needs the exact byte offset of the auth field in each message.
+- [x] Commit the current work.
+- [x] **Choose the codec.** Chose a small in-house BER codec (`message/ber.rs`) and removed `asn1-rs`. It mishandled OIDs with a second arc of 40 or more (rejecting them on encode and misreading them on decode) and added 16 crates, while SNMP's application types and device-quirk handling needed custom code either way.
+  - [ ] Delete the leftovers: the commented-out `asn1-rs` line in `snmprs_lib/Cargo.toml`, and the unused `Class` enum and `Tag::class()`.
 - [ ] **Fix `SnmpMessageBuilder`.** It returns only bytes, so the caller never learns the request ID and can't match the reply. Return a typed request and encode it separately.
-- [ ] **Fix OID limits.** Valid OIDs like `2.999.1` are rejected because `asn1-rs` can't encode a second arc of 40 or more. The in-house codec should fix this.
+- [ ] **Fix OID limits.** Valid OIDs like `2.999.1` are rejected.
+  - [x] Encode them: `ber::oid` writes the merged first value in base 128, so `2.999.1` encodes as `06 03 88 37 01`.
+  - [ ] Accept them: `ObjectIdentifier::new` still rejects any second arc above 39. Limit the second arc only under first arcs 0 and 1, and update `test_invalid_prefix_values`, which expects `2.40` to fail.
 - [ ] **Stop hiding bad values.**
   - [ ] `BulkPdu::new` silently clamps its values; use a checked input instead.
   - [ ] `ErrorStatus::from_int` turns unknown codes into `GenErr`; preserve the unknown code.
@@ -24,17 +25,21 @@ tests during Phases 1–2 rather than waiting for Phase 5.
   - [ ] Add a configurable policy for source addresses. The connected socket drops replies that a multihomed agent sends from a different IP.
   - [ ] Reuse the receive buffer; each receive allocates 65 KB.
 - [ ] **Protect secrets.** Derived `Debug` on `SnmpV2MessageBuilder` and `V2cMessage` prints the community string. Redact it there and accept communities as bytes.
-- [ ] **Rework the error types.** Make them structured, keep the `io::Error` source, and mark public enums `#[non_exhaustive]`. `ClientError` is currently just strings.
+- [x] **Rework the error types.** All error types now live in `errors.rs` and use `thiserror`. Variants carry structured fields instead of strings, OS failures keep their `io::Error` as the source, and the enums are `#[non_exhaustive]`. The CLI prints the full chain of causes.
 - [ ] **Tighten the public API.** Use one consistent `encode` visibility, and add `#![forbid(unsafe_code)]` and `#![warn(missing_docs)]`.
 
 ## Phase 1: Decoding (RFC 3416, 3417, 2578)
 
-- [ ] Add a BER reader that handles short and long definite lengths and rejects indefinite lengths.
+- [x] Add a BER reader that handles short and long definite lengths and rejects indefinite lengths. `ber::read` returns a borrowed `Tlv` (tag, value and the raw bytes for v3 HMAC checks) plus the remaining input, and `ber::expect` checks the tag.
 - [ ] Decode every type: integers, octet strings, OIDs, all application types, and the exception values.
 - [ ] Decode all PDU types and the v2c message wrapper.
 - [ ] Make hostile input safe: no panics, with limits on depth, lengths, varbind count and integer overflow.
+  - [x] Header level: `read` checks every declared length against the input, limits length fields to 4 bytes, and rejects multi-byte tags.
+  - [ ] Typed decoders: nesting depth, varbind count and integer overflow (`DecodeError::IntegerOverflow` is defined but not used yet).
 - [ ] Tolerate common device quirks, such as odd integer padding, behind a defined policy.
-- [ ] Add round-trip and property tests, plus fuzz targets.
+  - [x] Non-minimal lengths such as `81 05` are accepted, and the policy is documented on `read_length`.
+  - [ ] Decide the policy for integer padding and other value-level quirks.
+- [ ] Add round-trip and property tests, plus fuzz targets. Fixed encoding and decoding vectors exist in `ber.rs`; property tests and fuzz targets don't yet.
 
 ## Phase 2: A working v2c client
 

@@ -5,9 +5,10 @@
 //   community OCTET STRING,
 //   data      PDUs
 // }
-use super::der;
+use super::ber;
 use super::pdu::PduData;
 use crate::errors::SnmpMessageError;
+use crate::message::ber::Tag::{OctetString, Sequence};
 
 const SNMP_V2C_VERSION: i32 = 1;
 
@@ -23,10 +24,10 @@ impl V2cMessage {
     }
 
     pub fn encode(&self) -> Result<Vec<u8>, SnmpMessageError> {
-        let mut content = der::integer(SNMP_V2C_VERSION)?;
-        content.extend(der::octet_string(&self.community)?);
+        let mut content = ber::integer(SNMP_V2C_VERSION);
+        content.extend(ber::write(OctetString, &self.community));
         content.extend(self.data.encode()?);
-        der::sequence(&content)
+        Ok(ber::write(Sequence, &content))
     }
 }
 
