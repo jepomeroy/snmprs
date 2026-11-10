@@ -108,12 +108,9 @@ pub enum ClientError {
         source: io::Error,
     },
 
-    /// Sending a message failed.
-    #[error("failed to send to {remote}")]
-    Send {
-        remote: SocketAddr,
-        source: io::Error,
-    },
+    /// The host resolved successfully but yielded no addresses.
+    #[error("no addresses found for host {input}")]
+    NoResolvedAddresses { input: String },
 
     /// The OS sent only part of the message.
     #[error("sent only {sent} of {len} bytes to {remote}")]
@@ -123,18 +120,29 @@ pub enum ClientError {
         len: usize,
     },
 
-    /// No reply arrived before the read timeout.
-    #[error("no response from {remote} within {timeout:?}")]
-    Timeout {
-        remote: SocketAddr,
-        timeout: Duration,
-    },
-
     /// Receiving a message failed for a reason other than a timeout.
     #[error("failed to receive from {remote}")]
     Receive {
         remote: SocketAddr,
         source: io::Error,
+    },
+
+    /// Resolving the host (IP literal or hostname) failed.
+    #[error("failed to resolve host {input}")]
+    Resolve { input: String, source: io::Error },
+
+    /// Sending a message failed.
+    #[error("failed to send to {remote}")]
+    Send {
+        remote: SocketAddr,
+        source: io::Error,
+    },
+
+    /// No reply arrived before the read timeout.
+    #[error("no response from {remote} within {timeout:?}")]
+    Timeout {
+        remote: SocketAddr,
+        timeout: Duration,
     },
 }
 

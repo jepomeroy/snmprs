@@ -1,6 +1,6 @@
 use std::{
     io::ErrorKind,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket},
+    net::{SocketAddr, ToSocketAddrs, UdpSocket},
     time::Duration,
 };
 
@@ -21,16 +21,25 @@ pub struct BaseClient {
 }
 
 impl BaseClient {
-    pub fn new(ipaddr: &str, port: u16) -> Result<Self, ClientError> {
-        let remote_ip: Ipv4Addr = ipaddr
-            .parse()
-            .map_err(|source| ClientError::InvalidAddress {
-                input: ipaddr.to_string(),
-                source,
-            })?;
-        let remote = SocketAddr::V4(SocketAddrV4::new(remote_ip, port));
+    pub fn new(host: &str, port: u16) -> Result<Self, ClientError> {
+        let target = (host, port);
 
-        let local = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+        let remote = target
+            .to_socket_addrs()
+            .map_err(|source| ClientError::Resolve {
+                input: host.to_string(),
+                source,
+            })?
+            .next()
+            .ok_or_else(|| ClientError::NoResolvedAddresses {
+                input: host.to_string(),
+            })?;
+
+        let local = match remote {
+            SocketAddr::V4(_) => "0.0.0.0:0".parse().expect("valid IPv4 wildcard address"),
+            SocketAddr::V6(_) => "[::]:0".parse().expect("valid IPv6 wildcard address"),
+        };
+
         let udp = UdpSocket::bind(local).map_err(|source| ClientError::Bind { local, source })?;
 
         udp.set_read_timeout(Some(DEFAULT_READ_TIMEOUT))
@@ -138,12 +147,50 @@ mod tests {
     }
 
     #[test]
-    fn test_bad_ip_addr() {
-        let err = BaseClient::new("not-an-ip", DEFAULT_SNMP_PORT).unwrap_err();
+    fn test_unresolvable_host() {
+        // RFC 6761 reserves `.invalid`, so this never resolves on any network.
+        let err = BaseClient::new("host.invalid", DEFAULT_SNMP_PORT).unwrap_err();
         assert!(
-            matches!(&err, ClientError::InvalidAddress { input, .. } if input == "not-an-ip"),
+            matches!(&err, ClientError::Resolve { input, .. } if input == "host.invalid"),
             "got {:?}",
             err
         );
+    }
+
+    #[test]
+    fn test_send_by_hostname() {
+        let agent = UdpSocket::bind("127.0.0.1:0").unwrap();
+        agent.set_read_timeout(Some(TEST_TIMEOUT)).unwrap();
+        let port = agent.local_addr().unwrap().port();
+        let client = BaseClient::new("localhost", port).unwrap();
+        // `localhost` may resolve to ::1 first; this test only covers the IPv4 case.
+        if !client.remote.is_ipv4() {
+            return;
+        }
+
+        client.send(&[1, 2, 3]).unwrap();
+        let mut buffer = [0; 8];
+        let (size, _) = agent.recv_from(&mut buffer).unwrap();
+        assert_eq!(&buffer[..size], &[1, 2, 3]);
+    }
+
+    #[test]
+    fn test_send_and_receive_ipv6() {
+        // Skip on hosts without an IPv6 loopback.
+        let Ok(agent) = UdpSocket::bind("[::1]:0") else {
+            return;
+        };
+        agent.set_read_timeout(Some(TEST_TIMEOUT)).unwrap();
+        let port = agent.local_addr().unwrap().port();
+        let client = BaseClient::new("::1", port).unwrap();
+        assert!(client.socket.local_addr().unwrap().is_ipv6());
+
+        client.send(&[1, 2, 3]).unwrap();
+        let mut buffer = [0; 8];
+        let (size, client_addr) = agent.recv_from(&mut buffer).unwrap();
+        assert_eq!(&buffer[..size], &[1, 2, 3]);
+
+        agent.send_to(&[4, 5], client_addr).unwrap();
+        assert_eq!(client.receive().unwrap(), vec![4, 5]);
     }
 }
