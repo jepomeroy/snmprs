@@ -17,9 +17,9 @@ tests during Phases 1–2 rather than waiting for Phase 5.
 - [x] **Fix OID limits.** Valid OIDs like `2.999.1` are rejected.
     - [x] Encode them: `ber::oid` writes the merged first value in base 128, so `2.999.1` encodes as `06 03 88 37 01`.
     - [x] Accept them: `ObjectIdentifier::new` still rejects any second arc above 39. Limit the second arc only under first arcs 0 and 1, and update `test_invalid_prefix_values`, which expects `2.40` to fail.
-- [ ] **Stop hiding bad values.**
-    - [ ] `BulkPdu::new` silently clamps its values; use a checked input instead.
-    - [ ] `ErrorStatus::from_int` turns unknown codes into `GenErr`; preserve the unknown code.
+- [x] **Stop hiding bad values.**
+    - [x] `BulkPdu::new` silently clamps its values; use a checked input instead. It now returns `SnmpMessageError::BulkFieldOutOfRange` for values above 2147483647.
+    - [x] `ErrorStatus::from_int` turns unknown codes into `GenErr`; preserve the unknown code. Unknown codes now become `ErrorStatus::Unknown(code)`, and `to_int` returns them unchanged.
 - [ ] **Fix the socket setup.**
     - [ ] Support IPv6 and hostnames; `BaseClient` is IPv4 only.
     - [ ] Add a configurable policy for source addresses. The connected socket drops replies that a multihomed agent sends from a different IP.

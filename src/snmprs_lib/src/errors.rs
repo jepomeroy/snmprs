@@ -73,6 +73,10 @@ pub enum SnmpMessageError {
     /// A received message couldn't be decoded.
     #[error("failed to decode SNMP message")]
     Decode(#[from] DecodeError),
+
+    /// A GetBulkRequest field was above the RFC 3416 maximum of 2147483647.
+    #[error("{field} is {value}, above the maximum of {}", i32::MAX)]
+    BulkFieldOutOfRange { field: &'static str, value: u32 },
 }
 
 /// A failure in the UDP transport.
@@ -175,6 +179,8 @@ pub enum ErrorStatus {
     NotWritable,
     /// The variable does not exist and its name is inconsistent with creating it.
     InconsistentName,
+    /// A code that RFC 3416 doesn't define, kept as received.
+    Unknown(i32),
 }
 
 impl ErrorStatus {
@@ -200,10 +206,12 @@ impl ErrorStatus {
             ErrorStatus::AuthorizationError => 16,
             ErrorStatus::NotWritable => 17,
             ErrorStatus::InconsistentName => 18,
+            ErrorStatus::Unknown(code) => *code,
         }
     }
 
-    /// Converts an integer to an `ErrorStatus`.
+    /// Converts an integer to an `ErrorStatus`. Codes RFC 3416 doesn't define
+    /// become [`ErrorStatus::Unknown`] with the original value.
     pub fn from_int(value: i32) -> Self {
         match value {
             0 => ErrorStatus::NoError,
@@ -225,7 +233,7 @@ impl ErrorStatus {
             16 => ErrorStatus::AuthorizationError,
             17 => ErrorStatus::NotWritable,
             18 => ErrorStatus::InconsistentName,
-            _ => ErrorStatus::GenErr, // Default to GenErr for unknown values
+            other => ErrorStatus::Unknown(other),
         }
     }
 }
@@ -274,10 +282,24 @@ mod tests {
     }
 
     #[test]
-    fn test_error_status_from_unknown_int_is_gen_err() {
+    fn test_error_status_keeps_unknown_codes() {
         for code in [-1, 19, i32::MAX, i32::MIN] {
-            assert_eq!(ErrorStatus::from_int(code), ErrorStatus::GenErr);
+            let status = ErrorStatus::from_int(code);
+            assert_eq!(status, ErrorStatus::Unknown(code));
+            assert_eq!(status.to_int(), code);
         }
+    }
+
+    #[test]
+    fn test_bulk_field_error_message() {
+        let err = SnmpMessageError::BulkFieldOutOfRange {
+            field: "max-repetitions",
+            value: u32::MAX,
+        };
+        assert_eq!(
+            err.to_string(),
+            "max-repetitions is 4294967295, above the maximum of 2147483647"
+        );
     }
 
     #[test]

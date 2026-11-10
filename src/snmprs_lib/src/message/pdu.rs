@@ -107,15 +107,24 @@ pub struct BulkPdu {
 }
 
 impl BulkPdu {
-    pub fn new(non_repeaters: u32, max_repetitions: u32, v: Vec<VarBind>) -> Self {
-        // RFC 3416 limits both fields to 0..2147483647.
-        let clamp = |value: u32| i32::try_from(value).unwrap_or(i32::MAX);
-        Self {
+    /// Builds a GetBulkRequest PDU.
+    ///
+    /// RFC 3416 limits both fields to 0..2147483647; a larger value is an error
+    /// rather than being clamped.
+    pub fn new(
+        non_repeaters: u32,
+        max_repetitions: u32,
+        v: Vec<VarBind>,
+    ) -> Result<Self, SnmpMessageError> {
+        let check = |field: &'static str, value: u32| {
+            i32::try_from(value).map_err(|_| SnmpMessageError::BulkFieldOutOfRange { field, value })
+        };
+        Ok(Self {
             request_id: generate_request_id(),
-            non_repeaters: clamp(non_repeaters),
-            max_repetitions: clamp(max_repetitions),
+            non_repeaters: check("non-repeaters", non_repeaters)?,
+            max_repetitions: check("max-repetitions", max_repetitions)?,
             var_bindings: v,
-        }
+        })
     }
 
     pub fn request_id(&self) -> i32 {
@@ -274,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_bulk_request_id_getter() {
-        let pdu = BulkPdu::new(0, 0, vec![]).with_request_id(-5);
+        let pdu = BulkPdu::new(0, 0, vec![]).unwrap().with_request_id(-5);
         assert_eq!(pdu.request_id(), -5);
     }
 
@@ -312,14 +321,37 @@ mod tests {
 
     #[test]
     fn test_encode_bulk_pdu() {
-        let pdu = BulkPdu::new(1, 10, vec![var_bind()]).with_request_id(7);
+        let pdu = BulkPdu::new(1, 10, vec![var_bind()])
+            .unwrap()
+            .with_request_id(7);
         assert_eq!(pdu.encode().unwrap(), expected(0xa5, [7, 1, 10]));
     }
 
     #[test]
-    fn test_bulk_pdu_clamps_to_max_int() {
-        let pdu = BulkPdu::new(0, u32::MAX, vec![]);
+    fn test_bulk_pdu_accepts_max_int() {
+        let max = i32::MAX as u32;
+        let pdu = BulkPdu::new(max, max, vec![]).unwrap();
+        assert_eq!(pdu.non_repeaters, i32::MAX);
         assert_eq!(pdu.max_repetitions, i32::MAX);
+    }
+
+    #[test]
+    fn test_bulk_pdu_rejects_values_above_max_int() {
+        let too_big = i32::MAX as u32 + 1;
+        assert_eq!(
+            BulkPdu::new(too_big, 0, vec![]),
+            Err(SnmpMessageError::BulkFieldOutOfRange {
+                field: "non-repeaters",
+                value: too_big,
+            })
+        );
+        assert_eq!(
+            BulkPdu::new(0, u32::MAX, vec![]),
+            Err(SnmpMessageError::BulkFieldOutOfRange {
+                field: "max-repetitions",
+                value: u32::MAX,
+            })
+        );
     }
 
     #[test]

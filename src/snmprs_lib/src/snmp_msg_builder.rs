@@ -64,7 +64,7 @@ impl SnmpMessageBuilder for SnmpV2MessageBuilder {
             non_repeaters,
             max_repetitions,
             vec![var_bind(oid, BindValue::Unspecified)?],
-        );
+        )?;
         Ok(V2cMessage::new(self.community.clone(), pdu.into()))
     }
 
@@ -136,6 +136,15 @@ mod tests {
             0x05, 0x00,
         ];
         assert!(msg.ends_with(&tail), "{:02x?}", msg);
+    }
+
+    #[test]
+    fn test_get_bulk_rejects_out_of_range_fields() {
+        let builder = SnmpV2MessageBuilder::new("public".to_string());
+        assert!(matches!(
+            builder.get_bulk(SYS_DESCR, 0, u32::MAX),
+            Err(SnmpMessageError::BulkFieldOutOfRange { .. })
+        ));
     }
 
     #[test]
