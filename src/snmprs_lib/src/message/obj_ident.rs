@@ -5,7 +5,8 @@ use crate::errors::ObjectIdentifierError;
 const MIN_OBJECT_IDENTIFIER_LEN: usize = 2;
 const MAX_OBJECT_IDENTIFIER_LEN: usize = 128;
 
-// The first two arcs share one byte on the wire, and asn1-rs only encodes these ranges.
+// X.690 packs the first two arcs into one subidentifier (40*X + Y), so X must be 0..=2
+// and Y must be 0..=39 when X is 0 or 1.
 const MAX_FIRST_ARC: u32 = 2;
 const MAX_SECOND_ARC: u32 = 39;
 
@@ -30,7 +31,7 @@ impl ObjectIdentifier {
             });
         };
 
-        if oid[0] > MAX_FIRST_ARC || oid[1] > MAX_SECOND_ARC {
+        if oid[0] > MAX_FIRST_ARC || (oid[0] != 2 && oid[1] > MAX_SECOND_ARC) {
             return Err(ObjectIdentifierError::InvalidPrefix {
                 first: oid[0],
                 second: oid[1],
@@ -143,7 +144,7 @@ mod test {
         for (oid, oid_vec) in [
             ("0.0.1", vec![0, 0, 1]),
             ("1.39.1", vec![1, 39, 1]),
-            ("2.39.1", vec![2, 39, 1]),
+            ("2.999.1", vec![2, 999, 1]),
         ] {
             let oid = ObjectIdentifier::from_str(oid).unwrap();
             assert_eq!(oid.value, oid_vec)
@@ -194,7 +195,7 @@ mod test {
 
     #[test]
     fn test_invalid_prefix_values() {
-        for (oid, first, second) in [("3.0", 3, 0), ("2.40", 2, 40), ("0.40.1", 0, 40)] {
+        for (oid, first, second) in [("3.0", 3, 0), ("1.40", 1, 40), ("0.40.1", 0, 40)] {
             assert_eq!(
                 ObjectIdentifier::from_str(oid),
                 Err(ObjectIdentifierError::InvalidPrefix { first, second })
